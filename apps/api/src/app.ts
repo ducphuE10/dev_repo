@@ -19,8 +19,10 @@ import {
   type CategoryRecord,
   type CreatePostInput,
   type FeedTab,
+  type FlagReason,
   type PostMediaType,
   type PostRecord,
+  type SearchSort,
   type UpdateUserProfileInput,
   type UserRecord
 } from "./repository.ts";
@@ -28,10 +30,16 @@ import {
 export interface RedisClient {
   url: string;
   ping: () => Promise<"PONG">;
+  incrementSortedSetMember: (key: string, member: string, increment?: number) => Promise<void>;
+  getTopSortedSetMembers: (key: string, limit: number) => Promise<Array<{ member: string; score: number }>>;
   close: () => Promise<void>;
 }
 
-export type BackgroundJobName = "process-video" | "wrap-affiliate-link";
+export type BackgroundJobName =
+  | "process-video"
+  | "wrap-affiliate-link"
+  | "update-post-counts"
+  | "auto-flag-review";
 
 export interface BackgroundJobQueue {
   enqueue: (jobName: BackgroundJobName, payload: Record<string, unknown>) => Promise<void>;
@@ -63,6 +71,8 @@ export class ApiError extends Error {
 export const createRedisClient = (url: string): RedisClient => ({
   url,
   ping: async () => "PONG",
+  incrementSortedSetMember: async () => undefined,
+  getTopSortedSetMembers: async () => [],
   close: async () => undefined
 });
 
@@ -131,7 +141,10 @@ const uuidPattern =
 const currencyPattern = /^[A-Z]{3}$/;
 const feedTabs = new Set<FeedTab>(["for_you", "trending", "new"]);
 const mediaTypes = new Set<PostMediaType>(["photo", "video"]);
+const flagReasons = new Set<FlagReason>(["spam", "fake", "inappropriate", "affiliate_abuse"]);
+const searchSorts = new Set<SearchSort>(["upvotes", "newest"]);
 const oneDayInMilliseconds = 24 * 60 * 60 * 1000;
+const searchTrendingRedisKey = "search:trending";
 
 const requireObject = (value: unknown, message = "Request body must be an object.") => {
   if (!value || typeof value !== "object" || Array.isArray(value)) {
@@ -353,6 +366,20 @@ const readFeedLimit = (value: unknown) => {
   return limit;
 };
 
+const readSearchSort = (value: unknown): SearchSort => {
+  if (value === undefined) {
+    return "upvotes";
+  }
+
+  const sort = requireString(value, "sort").toLowerCase();
+
+  if (!searchSorts.has(sort as SearchSort)) {
+    throw new ApiError(400, "VALIDATION_ERROR", "sort must be either upvotes or newest.");
+  }
+
+  return sort as SearchSort;
+};
+
 const readFeedTab = (value: unknown): FeedTab => {
   if (value === undefined) {
     return "for_you";
@@ -374,6 +401,16 @@ const readOptionalCategorySlug = (value: unknown) => {
 };
 
 const readReviewText = (value: unknown) => readOptionalString(value, "review_text", 280);
+
+const readFlagReason = (value: unknown): FlagReason => {
+  const reason = requireString(value, "reason").toLowerCase();
+
+  if (!flagReasons.has(reason as FlagReason)) {
+    throw new ApiError(400, "VALIDATION_ERROR", "reason must be one of spam, fake, inappropriate, or affiliate_abuse.");
+  }
+
+  return reason as FlagReason;
+};
 
 const readUploadContentType = (value: unknown, mediaType: PostMediaType) => {
   const contentType = requireString(value, "content_type").toLowerCase();
@@ -427,6 +464,29 @@ const inferAffiliatePlatform = (url: string | undefined) => {
   }
 
   return "other";
+};
+
+const normalizeSearchTerm = (value: string) => value.trim().replace(/\s+/g, " ").toLowerCase();
+
+const applyAffiliateTracking = (url: string, platform: string | null) => {
+  const redirectUrl = new URL(url);
+
+  redirectUrl.searchParams.set("utm_source", "dupehunt");
+  redirectUrl.searchParams.set("utm_medium", "affiliate");
+
+  if (platform === "amazon" && !redirectUrl.searchParams.has("tag")) {
+    redirectUrl.searchParams.set("tag", "dupehunt-20");
+  }
+
+  if (platform === "walmart" && !redirectUrl.searchParams.has("athbdg")) {
+    redirectUrl.searchParams.set("athbdg", "L1100");
+  }
+
+  if (platform === "target" && !redirectUrl.searchParams.has("clkid")) {
+    redirectUrl.searchParams.set("clkid", "dupehunt");
+  }
+
+  return redirectUrl.toString();
 };
 
 const createUploadSignature = (key: string, contentType: string, expiresAt: number, secret: string) =>
@@ -606,6 +666,14 @@ const readOptionalAuthenticatedUser = async (request: FastifyRequest, app: Fasti
   }
 
   return requireAuthenticatedUser(request, app);
+};
+
+const requireAdminRequest = (request: FastifyRequest, app: FastifyInstance) => {
+  const adminKey = request.headers["x-admin-key"];
+
+  if (typeof adminKey !== "string" || adminKey !== app.config.adminApiKey) {
+    throw new ApiError(401, "ADMIN_UNAUTHORIZED", "A valid admin key is required.");
+  }
 };
 
 const resolveCategoryFilterIds = async (
@@ -820,6 +888,49 @@ const registerUserRoutes = (app: FastifyInstance) => {
     };
   });
 
+  app.get("/users/me/saves", async (request) => {
+    const { user } = await requireAuthenticatedUser(request, app);
+    const posts = await app.repository.listSavedPosts(user.id);
+
+    return {
+      posts: posts.map(toPost)
+    };
+  });
+
+  app.post("/users/:id/follow", async (request, reply) => {
+    const { user } = await requireAuthenticatedUser(request, app);
+    const params = requireObject(request.params, "Route params must be an object.");
+    const targetUserId = normalizeUserId(requireString(params.id, "id"));
+
+    if (targetUserId === user.id) {
+      throw new ApiError(400, "INVALID_FOLLOW_TARGET", "You cannot follow yourself.");
+    }
+
+    const targetUser = await app.repository.findUserById(targetUserId);
+
+    if (!targetUser) {
+      throw new ApiError(404, "USER_NOT_FOUND", "User profile was not found.");
+    }
+
+    await app.repository.followUser(user.id, targetUserId);
+
+    return reply.status(204).send();
+  });
+
+  app.delete("/users/:id/follow", async (request, reply) => {
+    const { user } = await requireAuthenticatedUser(request, app);
+    const params = requireObject(request.params, "Route params must be an object.");
+    const targetUserId = normalizeUserId(requireString(params.id, "id"));
+
+    if (targetUserId === user.id) {
+      throw new ApiError(400, "INVALID_FOLLOW_TARGET", "You cannot unfollow yourself.");
+    }
+
+    await app.repository.unfollowUser(user.id, targetUserId);
+
+    return reply.status(204).send();
+  });
+
   app.get("/users/:id", async (request) => {
     const params = requireObject(request.params, "Route params must be an object.");
     const userId = normalizeUserId(requireString(params.id, "id"));
@@ -973,6 +1084,145 @@ const registerPostRoutes = (app: FastifyInstance) => {
     };
   });
 
+  app.post("/posts/:id/upvote", async (request) => {
+    const { user } = await requireAuthenticatedUser(request, app);
+    const params = requireObject(request.params, "Route params must be an object.");
+    const postId = normalizePostId(requireString(params.id, "id"));
+    const post = await app.repository.upvotePost(user.id, postId);
+
+    if (!post) {
+      throw new ApiError(404, "POST_NOT_FOUND", "Post was not found.");
+    }
+
+    await app.jobs.enqueue("update-post-counts", {
+      postId,
+      actorUserId: user.id,
+      event: "upvote"
+    });
+
+    return {
+      post: toPost(post)
+    };
+  });
+
+  app.delete("/posts/:id/upvote", async (request, reply) => {
+    const { user } = await requireAuthenticatedUser(request, app);
+    const params = requireObject(request.params, "Route params must be an object.");
+    const postId = normalizePostId(requireString(params.id, "id"));
+    const post = await app.repository.removeUpvote(user.id, postId);
+
+    if (!post) {
+      throw new ApiError(404, "POST_NOT_FOUND", "Post was not found.");
+    }
+
+    await app.jobs.enqueue("update-post-counts", {
+      postId,
+      actorUserId: user.id,
+      event: "remove_upvote"
+    });
+
+    return reply.status(204).send();
+  });
+
+  app.post("/posts/:id/downvote", async (request) => {
+    const { user } = await requireAuthenticatedUser(request, app);
+    const params = requireObject(request.params, "Route params must be an object.");
+    const postId = normalizePostId(requireString(params.id, "id"));
+    const post = await app.repository.downvotePost(user.id, postId);
+
+    if (!post) {
+      throw new ApiError(404, "POST_NOT_FOUND", "Post was not found.");
+    }
+
+    await app.jobs.enqueue("update-post-counts", {
+      postId,
+      actorUserId: user.id,
+      event: "downvote"
+    });
+
+    return {
+      post: toPost(post)
+    };
+  });
+
+  app.delete("/posts/:id/downvote", async (request, reply) => {
+    const { user } = await requireAuthenticatedUser(request, app);
+    const params = requireObject(request.params, "Route params must be an object.");
+    const postId = normalizePostId(requireString(params.id, "id"));
+    const post = await app.repository.removeDownvote(user.id, postId);
+
+    if (!post) {
+      throw new ApiError(404, "POST_NOT_FOUND", "Post was not found.");
+    }
+
+    await app.jobs.enqueue("update-post-counts", {
+      postId,
+      actorUserId: user.id,
+      event: "remove_downvote"
+    });
+
+    return reply.status(204).send();
+  });
+
+  app.post("/posts/:id/save", async (request) => {
+    const { user } = await requireAuthenticatedUser(request, app);
+    const params = requireObject(request.params, "Route params must be an object.");
+    const postId = normalizePostId(requireString(params.id, "id"));
+    const post = await app.repository.savePost(user.id, postId);
+
+    if (!post) {
+      throw new ApiError(404, "POST_NOT_FOUND", "Post was not found.");
+    }
+
+    return {
+      post: toPost(post)
+    };
+  });
+
+  app.delete("/posts/:id/save", async (request, reply) => {
+    const { user } = await requireAuthenticatedUser(request, app);
+    const params = requireObject(request.params, "Route params must be an object.");
+    const postId = normalizePostId(requireString(params.id, "id"));
+    const post = await app.repository.removeSavedPost(user.id, postId);
+
+    if (!post) {
+      throw new ApiError(404, "POST_NOT_FOUND", "Post was not found.");
+    }
+
+    return reply.status(204).send();
+  });
+
+  app.post("/posts/:id/flag", async (request) => {
+    const { user } = await requireAuthenticatedUser(request, app);
+    const params = requireObject(request.params, "Route params must be an object.");
+    const body = requireObject(request.body);
+    const postId = normalizePostId(requireString(params.id, "id"));
+    const reason = readFlagReason(body.reason);
+    const post = await app.repository.flagPost(user.id, postId, reason);
+
+    if (!post) {
+      throw new ApiError(404, "POST_NOT_FOUND", "Post was not found.");
+    }
+
+    await app.jobs.enqueue("update-post-counts", {
+      postId,
+      actorUserId: user.id,
+      event: "flag",
+      reason
+    });
+
+    if (post.flagCount >= 5) {
+      await app.jobs.enqueue("auto-flag-review", {
+        postId,
+        flagCount: post.flagCount
+      });
+    }
+
+    return {
+      post: toPost(post)
+    };
+  });
+
   app.delete("/posts/:id", async (request, reply) => {
     const { user } = await requireAuthenticatedUser(request, app);
     const params = requireObject(request.params, "Route params must be an object.");
@@ -990,6 +1240,141 @@ const registerPostRoutes = (app: FastifyInstance) => {
     await app.repository.softDeletePost(postId);
 
     return reply.status(204).send();
+  });
+};
+
+const registerSearchRoutes = (app: FastifyInstance) => {
+  app.get("/search", async (request) => {
+    const query = requireObject(request.query, "Query params must be an object.");
+    const searchQuery = normalizeSearchTerm(requireString(query.q, "q"));
+    const categorySlug = readOptionalCategorySlug(query.category);
+    const verifiedOnly = readOptionalBooleanQuery(query.verified, "verified");
+    const sort = readSearchSort(query.sort);
+    const limit = readFeedLimit(query.limit);
+    const cursor = query.cursor === undefined ? undefined : normalizePostId(requireString(query.cursor, "cursor"));
+    const activeCategories = await app.repository.listActiveCategories();
+    const requestedCategory = categorySlug
+      ? activeCategories.find((category) => category.slug === categorySlug)
+      : undefined;
+
+    if (categorySlug && !requestedCategory) {
+      throw new ApiError(400, "INVALID_CATEGORY_FILTER", "category must reference an active category slug.");
+    }
+
+    if (cursor) {
+      const cursorPost = await app.repository.findPostById(cursor);
+
+      if (!cursorPost) {
+        throw new ApiError(400, "INVALID_CURSOR", "cursor must reference an active post.");
+      }
+    }
+
+    const posts = await app.repository.searchPosts({
+      query: searchQuery,
+      categoryIds: requestedCategory ? [requestedCategory.id] : undefined,
+      verifiedOnly,
+      sort,
+      cursor,
+      limit: limit + 1
+    });
+    const page = posts.slice(0, limit);
+    const hasMore = posts.length > limit;
+
+    await app.redis.incrementSortedSetMember(searchTrendingRedisKey, searchQuery, 1);
+
+    return {
+      posts: page.map(toPost),
+      next_cursor: hasMore ? page.at(-1)?.id ?? null : null
+    };
+  });
+
+  app.get("/search/trending", async (request) => {
+    const query = requireObject(request.query, "Query params must be an object.");
+    const limit = query.limit === undefined ? 10 : readPositiveInteger(query.limit, "limit");
+    const terms = await app.redis.getTopSortedSetMembers(searchTrendingRedisKey, Math.min(limit, 20));
+
+    return {
+      terms: terms.map((term) => ({
+        term: term.member,
+        search_count: term.score
+      }))
+    };
+  });
+};
+
+const registerAffiliateRoutes = (app: FastifyInstance) => {
+  app.get("/affiliate/go/:postId", async (request, reply) => {
+    const authenticated = await readOptionalAuthenticatedUser(request, app);
+    const params = requireObject(request.params, "Route params must be an object.");
+    const postId = normalizePostId(requireString(params.postId, "postId"));
+    const post = await app.repository.findPostById(postId);
+
+    if (!post) {
+      throw new ApiError(404, "POST_NOT_FOUND", "Post was not found.");
+    }
+
+    if (!post.affiliateLink) {
+      throw new ApiError(404, "AFFILIATE_LINK_NOT_FOUND", "This post does not have an affiliate link.");
+    }
+
+    const sessionIdHeader = request.headers["x-session-id"];
+    const sessionId =
+      typeof sessionIdHeader === "string" && sessionIdHeader.trim().length > 0 ? sessionIdHeader.trim() : randomUUID();
+
+    await app.repository.recordAffiliateClick(post.id, authenticated?.user.id ?? null, sessionId);
+
+    return reply.redirect(applyAffiliateTracking(post.affiliateLink, post.affiliatePlatform), 302);
+  });
+};
+
+const registerAdminRoutes = (app: FastifyInstance) => {
+  app.get("/admin/flags", async (request) => {
+    requireAdminRequest(request, app);
+    const posts = await app.repository.listFlaggedPosts();
+
+    return {
+      posts: posts.map(toPost)
+    };
+  });
+
+  app.patch("/admin/posts/:id", async (request) => {
+    requireAdminRequest(request, app);
+    const params = requireObject(request.params, "Route params must be an object.");
+    const body = requireObject(request.body);
+    const postId = normalizePostId(requireString(params.id, "id"));
+    const status = requireString(body.status, "status").toLowerCase();
+
+    if (status !== "active" && status !== "flagged" && status !== "removed") {
+      throw new ApiError(400, "VALIDATION_ERROR", "status must be one of active, flagged, or removed.");
+    }
+
+    const post = await app.repository.updatePostStatus(postId, status);
+
+    if (!post) {
+      throw new ApiError(404, "POST_NOT_FOUND", "Post was not found.");
+    }
+
+    return {
+      post: toPost(post)
+    };
+  });
+
+  app.get("/admin/stats", async (request) => {
+    requireAdminRequest(request, app);
+    const stats = await app.repository.getAdminStats();
+
+    return {
+      stats: {
+        total_users: stats.totalUsers,
+        total_posts: stats.totalPosts,
+        active_posts: stats.activePosts,
+        flagged_posts: stats.flaggedPosts,
+        removed_posts: stats.removedPosts,
+        affiliate_clicks: stats.affiliateClicks,
+        affiliate_conversions: stats.affiliateConversions,
+        affiliate_commission_amount: stats.affiliateCommissionAmount
+      }
+    };
   });
 };
 
@@ -1034,6 +1419,9 @@ export const buildApiServer = (options: BuildApiServerOptions = {}): FastifyInst
   registerCategoryRoutes(app);
   registerUploadRoutes(app);
   registerPostRoutes(app);
+  registerSearchRoutes(app);
+  registerAffiliateRoutes(app);
+  registerAdminRoutes(app);
 
   app.addHook("onClose", async () => {
     if (ownsJobs) {

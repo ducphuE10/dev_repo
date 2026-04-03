@@ -12,6 +12,7 @@ import {
   type CreatePostInput,
   type CreateUserInput,
   type FeedTab,
+  type FlagReason,
   type PostRecord,
   type UpdateUserProfileInput,
   type UserRecord
@@ -30,6 +31,7 @@ const createTestConfig = (): ApiConfig => ({
   typesenseHost: "http://localhost:8108",
   typesenseApiKey: "typesense-key",
   affiliateWrappingDomain: "https://go.dupehunt.com",
+  adminApiKey: "internal-admin-key",
   ocrServiceKey: "ocr-key",
   port: 3001,
   nodeEnv: "test"
@@ -42,11 +44,30 @@ const createDatabaseDouble = (): DatabaseClient =>
     close: async () => undefined
   }) satisfies DatabaseClient;
 
-const createRedisDouble = (): RedisClient => ({
-  url: "redis://localhost:6379",
-  ping: async () => "PONG",
-  close: async () => undefined
-});
+const createRedisDouble = () => {
+  const sortedSets = new Map<string, Map<string, number>>();
+
+  const redis: RedisClient = {
+    url: "redis://localhost:6379",
+    ping: async () => "PONG",
+    incrementSortedSetMember: async (key, member, increment = 1) => {
+      const set = sortedSets.get(key) ?? new Map<string, number>();
+      set.set(member, (set.get(member) ?? 0) + increment);
+      sortedSets.set(key, set);
+    },
+    getTopSortedSetMembers: async (key, limit) =>
+      Array.from(sortedSets.get(key)?.entries() ?? [])
+        .sort((left, right) => right[1] - left[1] || left[0].localeCompare(right[0]))
+        .slice(0, limit)
+        .map(([member, score]) => ({ member, score })),
+    close: async () => undefined
+  };
+
+  return {
+    redis,
+    sortedSets
+  };
+};
 
 const now = "2026-04-03T12:00:00.000Z";
 
@@ -139,6 +160,41 @@ const sortPosts = (posts: PostRecord[], tab: FeedTab) =>
     return right.id.localeCompare(left.id);
   });
 
+const sortSearchPosts = (posts: PostRecord[], sort: "upvotes" | "newest") =>
+  [...posts].sort((left, right) => {
+    if (sort === "upvotes" && left.upvoteCount !== right.upvoteCount) {
+      return right.upvoteCount - left.upvoteCount;
+    }
+
+    const createdAtDelta = Date.parse(right.createdAt) - Date.parse(left.createdAt);
+
+    if (createdAtDelta !== 0) {
+      return createdAtDelta;
+    }
+
+    return right.id.localeCompare(left.id);
+  });
+
+const matchesSearchQuery = (post: PostRecord, query: string) => {
+  const haystack = [
+    post.originalProductName,
+    post.originalBrand,
+    post.dupeProductName,
+    post.dupeBrand,
+    post.reviewText,
+    post.category.name
+  ]
+    .filter((value): value is string => Boolean(value))
+    .join(" ")
+    .toLowerCase();
+
+  return query
+    .trim()
+    .toLowerCase()
+    .split(/\s+/)
+    .every((term) => haystack.includes(term));
+};
+
 const createRepositoryDouble = () => {
   const users = new Map<string, UserRecord>();
   const categories = [
@@ -161,7 +217,85 @@ const createRepositoryDouble = () => {
   ];
   const userCategorySelections = new Map<string, number[]>();
   const posts = new Map<string, PostRecord>();
+  const upvotes = new Set<string>();
+  const downvotes = new Set<string>();
+  const saves = new Set<string>();
+  const saveOrder = new Map<string, number>();
+  const follows = new Set<string>();
+  const flags = new Map<string, { reason: FlagReason; createdAt: string }>();
+  const affiliateClicks: Array<{ postId: string; userId: string | null; sessionId: string; affiliatePlatform: string | null }> = [];
   let postCounter = 2;
+  let actionOrder = 1;
+
+  const interactionKey = (userId: string, postId: string) => `${userId}:${postId}`;
+  const isVisiblePost = (post: PostRecord) => post.status === "active" && post.category.isActive;
+
+  const refreshAuthorTotalUpvotes = (userId: string) => {
+    const author = users.get(userId);
+
+    if (!author) {
+      return;
+    }
+
+    const totalUpvotes = Array.from(posts.values())
+      .filter((post) => post.userId === userId && post.status === "active")
+      .reduce((sum, post) => sum + post.upvoteCount, 0);
+
+    users.set(userId, {
+      ...author,
+      totalUpvotes
+    });
+  };
+
+  const refreshPostCounts = (postId: string) => {
+    const existing = posts.get(postId);
+
+    if (!existing) {
+      return null;
+    }
+
+    const updated: PostRecord = {
+      ...existing,
+      upvoteCount: Array.from(upvotes).filter((entry) => entry.endsWith(`:${postId}`)).length,
+      downvoteCount: Array.from(downvotes).filter((entry) => entry.endsWith(`:${postId}`)).length,
+      flagCount: Array.from(flags.keys()).filter((entry) => entry.endsWith(`:${postId}`)).length,
+      updatedAt: now
+    };
+
+    posts.set(postId, updated);
+    refreshAuthorTotalUpvotes(updated.userId);
+
+    return updated;
+  };
+
+  const transitionPostStatus = (postId: string, nextStatus: PostRecord["status"]) => {
+    const existing = posts.get(postId);
+
+    if (!existing) {
+      return null;
+    }
+
+    if (existing.status === nextStatus) {
+      return existing;
+    }
+
+    if (existing.status === "active" && nextStatus !== "active") {
+      existing.category.postCount = Math.max(existing.category.postCount - 1, 0);
+    } else if (existing.status !== "active" && nextStatus === "active") {
+      existing.category.postCount += 1;
+    }
+
+    const updated: PostRecord = {
+      ...existing,
+      status: nextStatus,
+      updatedAt: now
+    };
+
+    posts.set(postId, updated);
+    refreshAuthorTotalUpvotes(updated.userId);
+
+    return updated;
+  };
 
   const repository: ApiRepository = {
     findUserByEmail: async (email) =>
@@ -307,19 +441,191 @@ const createRepositoryDouble = () => {
 
       return cursorIndex === -1 ? [] : sorted.slice(cursorIndex + 1, cursorIndex + 1 + input.limit);
     },
-    softDeletePost: async (postId) => {
-      const existing = posts.get(postId);
+    searchPosts: async (input) => {
+      const categoryIds = input.categoryIds ? new Set(input.categoryIds) : null;
+      const filtered = Array.from(posts.values()).filter((post) => {
+        if (!isVisiblePost(post)) {
+          return false;
+        }
 
-      if (!existing || existing.status === "removed") {
-        return;
+        if (!matchesSearchQuery(post, input.query)) {
+          return false;
+        }
+
+        if (input.verifiedOnly && !post.isVerifiedBuy) {
+          return false;
+        }
+
+        if (categoryIds && !categoryIds.has(post.categoryId)) {
+          return false;
+        }
+
+        return true;
+      });
+      const sorted = sortSearchPosts(filtered, input.sort);
+
+      if (!input.cursor) {
+        return sorted.slice(0, input.limit);
       }
 
-      posts.set(postId, {
-        ...existing,
-        status: "removed",
-        updatedAt: now
+      const cursorIndex = sorted.findIndex((post) => post.id === input.cursor);
+
+      return cursorIndex === -1 ? [] : sorted.slice(cursorIndex + 1, cursorIndex + 1 + input.limit);
+    },
+    listSavedPosts: async (userId) =>
+      Array.from(saveOrder.entries())
+        .filter(([entry]) => entry.startsWith(`${userId}:`))
+        .sort((left, right) => right[1] - left[1])
+        .map(([entry]) => posts.get(entry.split(":")[1] ?? ""))
+        .filter((post): post is PostRecord => post !== undefined && isVisiblePost(post)),
+    followUser: async (followerId, followingId) => {
+      follows.add(interactionKey(followerId, followingId));
+    },
+    unfollowUser: async (followerId, followingId) => {
+      follows.delete(interactionKey(followerId, followingId));
+    },
+    upvotePost: async (userId, postId) => {
+      const post = posts.get(postId);
+
+      if (!post || !isVisiblePost(post)) {
+        return null;
+      }
+
+      upvotes.add(interactionKey(userId, postId));
+      downvotes.delete(interactionKey(userId, postId));
+
+      return refreshPostCounts(postId);
+    },
+    removeUpvote: async (userId, postId) => {
+      const post = posts.get(postId);
+
+      if (!post || !isVisiblePost(post)) {
+        return null;
+      }
+
+      upvotes.delete(interactionKey(userId, postId));
+
+      return refreshPostCounts(postId);
+    },
+    downvotePost: async (userId, postId) => {
+      const post = posts.get(postId);
+
+      if (!post || !isVisiblePost(post)) {
+        return null;
+      }
+
+      downvotes.add(interactionKey(userId, postId));
+      upvotes.delete(interactionKey(userId, postId));
+
+      return refreshPostCounts(postId);
+    },
+    removeDownvote: async (userId, postId) => {
+      const post = posts.get(postId);
+
+      if (!post || !isVisiblePost(post)) {
+        return null;
+      }
+
+      downvotes.delete(interactionKey(userId, postId));
+
+      return refreshPostCounts(postId);
+    },
+    savePost: async (userId, postId) => {
+      const post = posts.get(postId);
+
+      if (!post || !isVisiblePost(post)) {
+        return null;
+      }
+
+      const key = interactionKey(userId, postId);
+      saves.add(key);
+      saveOrder.set(key, actionOrder);
+      actionOrder += 1;
+
+      return post;
+    },
+    removeSavedPost: async (userId, postId) => {
+      const post = posts.get(postId);
+
+      if (!post || !isVisiblePost(post)) {
+        return null;
+      }
+
+      const key = interactionKey(userId, postId);
+      saves.delete(key);
+      saveOrder.delete(key);
+
+      return post;
+    },
+    flagPost: async (userId, postId, reason) => {
+      const post = posts.get(postId);
+
+      if (!post || !isVisiblePost(post)) {
+        return null;
+      }
+
+      const key = interactionKey(userId, postId);
+
+      if (flags.has(key)) {
+        throw Object.assign(new Error("You have already flagged this post."), {
+          statusCode: 409,
+          code: "POST_ALREADY_FLAGGED"
+        });
+      }
+
+      flags.set(key, {
+        reason,
+        createdAt: now
       });
-      existing.category.postCount = Math.max(existing.category.postCount - 1, 0);
+
+      const updated = refreshPostCounts(postId);
+
+      if (updated && updated.flagCount >= 5 && updated.status === "active") {
+        return transitionPostStatus(postId, "flagged");
+      }
+
+      return updated;
+    },
+    recordAffiliateClick: async (postId, userId, sessionId) => {
+      const post = posts.get(postId);
+
+      assert.ok(post, "expected affiliate click post to exist");
+      affiliateClicks.push({
+        postId,
+        userId,
+        sessionId,
+        affiliatePlatform: post.affiliatePlatform
+      });
+    },
+    listFlaggedPosts: async () =>
+      Array.from(posts.values())
+        .filter((post) => post.status === "flagged")
+        .sort((left, right) => {
+          if (left.flagCount !== right.flagCount) {
+            return right.flagCount - left.flagCount;
+          }
+
+          const createdAtDelta = Date.parse(right.createdAt) - Date.parse(left.createdAt);
+
+          if (createdAtDelta !== 0) {
+            return createdAtDelta;
+          }
+
+          return right.id.localeCompare(left.id);
+        }),
+    updatePostStatus: async (postId, status) => transitionPostStatus(postId, status),
+    getAdminStats: async () => ({
+      totalUsers: users.size,
+      totalPosts: posts.size,
+      activePosts: Array.from(posts.values()).filter((post) => post.status === "active").length,
+      flaggedPosts: Array.from(posts.values()).filter((post) => post.status === "flagged").length,
+      removedPosts: Array.from(posts.values()).filter((post) => post.status === "removed").length,
+      affiliateClicks: affiliateClicks.length,
+      affiliateConversions: 0,
+      affiliateCommissionAmount: 0
+    }),
+    softDeletePost: async (postId) => {
+      transitionPostStatus(postId, "removed");
     }
   };
 
@@ -328,7 +634,13 @@ const createRepositoryDouble = () => {
     users,
     categories,
     posts,
-    userCategorySelections
+    userCategorySelections,
+    upvotes,
+    downvotes,
+    saves,
+    follows,
+    flags,
+    affiliateClicks
   };
 };
 
@@ -447,13 +759,15 @@ const createAuthProviderDouble = (config: ApiConfig) => {
 
 const createTestServer = () => {
   const config = createTestConfig();
-  const { repository, users, categories, posts, userCategorySelections } = createRepositoryDouble();
+  const { repository, users, categories, posts, userCategorySelections, upvotes, downvotes, saves, follows, flags, affiliateClicks } =
+    createRepositoryDouble();
   const { authProvider, createSession } = createAuthProviderDouble(config);
   const { jobs, queue } = createJobQueueDouble();
+  const { redis, sortedSets } = createRedisDouble();
   const app = buildApiServer({
     config,
     database: createDatabaseDouble(),
-    redis: createRedisDouble(),
+    redis,
     repository,
     authProvider,
     jobs: queue
@@ -463,8 +777,16 @@ const createTestServer = () => {
     app,
     categories,
     config,
+    downvotes,
+    affiliateClicks,
+    flags,
+    follows,
     jobs,
     posts,
+    redis,
+    saves,
+    sortedSets,
+    upvotes,
     users,
     userCategorySelections,
     createSession
@@ -485,6 +807,7 @@ test("loadApiConfig parses the shared API contract into runtime config", () => {
     TYPESENSE_HOST: "http://localhost:8108",
     TYPESENSE_API_KEY: "typesense-key",
     AFFILIATE_WRAPPING_DOMAIN: "https://go.dupehunt.com",
+    ADMIN_API_KEY: "internal-admin-key",
     OCR_SERVICE_KEY: "ocr-key",
     PORT: "3001",
     NODE_ENV: "test"
@@ -1094,6 +1417,334 @@ test("GET /posts/:id returns active posts and DELETE /posts/:id is owner-only so
   });
 
   assert.equal(notFoundResponse.statusCode, 404);
+});
+
+test("social routes persist vote, save, and follow state while enqueuing count-sync jobs", async (context) => {
+  const { app, categories, jobs, posts, users, userCategorySelections, createSession, follows } = createTestServer();
+  const author = createUserRecord();
+  const viewer = createUserRecord({
+    id: "33333333-3333-4333-8333-333333333333",
+    username: "viewer_user",
+    email: "viewer@example.com"
+  });
+  users.set(author.id, author);
+  users.set(viewer.id, viewer);
+  userCategorySelections.set(viewer.id, [categories[0]!.id]);
+  const post = createPostRecord({
+    id: "44444444-4444-4444-8444-000000000401",
+    user: author,
+    userId: author.id,
+    category: categories[0]!,
+    categoryId: categories[0]!.id
+  });
+  posts.set(post.id, post);
+  const session = createSession(viewer.id, viewer.email, "password", "social-refresh");
+
+  context.after(async () => {
+    await app.close();
+  });
+
+  const upvoteResponse = await app.inject({
+    method: "POST",
+    url: `/posts/${post.id}/upvote`,
+    headers: {
+      authorization: `Bearer ${session.accessToken}`
+    }
+  });
+
+  assert.equal(upvoteResponse.statusCode, 200);
+  assert.equal(upvoteResponse.json().post.upvote_count, 1);
+
+  const downvoteResponse = await app.inject({
+    method: "POST",
+    url: `/posts/${post.id}/downvote`,
+    headers: {
+      authorization: `Bearer ${session.accessToken}`
+    }
+  });
+
+  assert.equal(downvoteResponse.statusCode, 200);
+  assert.equal(downvoteResponse.json().post.upvote_count, 0);
+  assert.equal(downvoteResponse.json().post.downvote_count, 1);
+
+  const saveResponse = await app.inject({
+    method: "POST",
+    url: `/posts/${post.id}/save`,
+    headers: {
+      authorization: `Bearer ${session.accessToken}`
+    }
+  });
+
+  assert.equal(saveResponse.statusCode, 200);
+
+  const savesResponse = await app.inject({
+    method: "GET",
+    url: "/users/me/saves",
+    headers: {
+      authorization: `Bearer ${session.accessToken}`
+    }
+  });
+
+  assert.equal(savesResponse.statusCode, 200);
+  assert.deepEqual(
+    savesResponse.json().posts.map((entry: { id: string }) => entry.id),
+    [post.id]
+  );
+
+  const followResponse = await app.inject({
+    method: "POST",
+    url: `/users/${author.id}/follow`,
+    headers: {
+      authorization: `Bearer ${session.accessToken}`
+    }
+  });
+
+  assert.equal(followResponse.statusCode, 204);
+  assert.equal(follows.has(`${viewer.id}:${author.id}`), true);
+
+  const unfollowResponse = await app.inject({
+    method: "DELETE",
+    url: `/users/${author.id}/follow`,
+    headers: {
+      authorization: `Bearer ${session.accessToken}`
+    }
+  });
+
+  assert.equal(unfollowResponse.statusCode, 204);
+  assert.equal(follows.has(`${viewer.id}:${author.id}`), false);
+  assert.deepEqual(
+    jobs.map((job) => job.name),
+    ["update-post-counts", "update-post-counts"]
+  );
+});
+
+test("flagging a post auto-flags it after five reports and surfaces it in the admin queue", async (context) => {
+  const { app, categories, jobs, posts, users, createSession } = createTestServer();
+  const author = createUserRecord();
+  users.set(author.id, author);
+  const post = createPostRecord({
+    id: "44444444-4444-4444-8444-000000000402",
+    user: author,
+    userId: author.id,
+    category: categories[0]!,
+    categoryId: categories[0]!.id
+  });
+  posts.set(post.id, post);
+  const reporters = Array.from({ length: 5 }, (_, index) =>
+    createUserRecord({
+      id: `55555555-5555-4555-8555-${String(index + 1).padStart(12, "0")}`,
+      username: `reporter_${index + 1}`,
+      email: `reporter_${index + 1}@example.com`
+    })
+  );
+
+  for (const reporter of reporters) {
+    users.set(reporter.id, reporter);
+  }
+
+  context.after(async () => {
+    await app.close();
+  });
+
+  for (const reporter of reporters) {
+    const session = createSession(reporter.id, reporter.email, "password", `flag-refresh-${reporter.id}`);
+    const response = await app.inject({
+      method: "POST",
+      url: `/posts/${post.id}/flag`,
+      headers: {
+        authorization: `Bearer ${session.accessToken}`
+      },
+      payload: {
+        reason: "spam"
+      }
+    });
+
+    assert.equal(response.statusCode, 200);
+  }
+
+  assert.equal(posts.get(post.id)?.status, "flagged");
+  assert.equal(
+    jobs.some((job) => job.name === "auto-flag-review" && job.payload.postId === post.id),
+    true
+  );
+
+  const adminQueueResponse = await app.inject({
+    method: "GET",
+    url: "/admin/flags",
+    headers: {
+      "x-admin-key": "internal-admin-key"
+    }
+  });
+
+  assert.equal(adminQueueResponse.statusCode, 200);
+  assert.deepEqual(
+    adminQueueResponse.json().posts.map((entry: { id: string }) => entry.id),
+    [post.id]
+  );
+});
+
+test("search returns filtered matches and trending search terms", async (context) => {
+  const { app, categories, posts, users } = createTestServer();
+  const author = createUserRecord();
+  users.set(author.id, author);
+  posts.set(
+    "44444444-4444-4444-8444-000000000501",
+    createPostRecord({
+      id: "44444444-4444-4444-8444-000000000501",
+      user: author,
+      userId: author.id,
+      category: categories[0]!,
+      categoryId: categories[0]!.id,
+      dupeProductName: "e.l.f. Halo Glow Liquid Filter",
+      reviewText: "Halo glow finish for cheap.",
+      upvoteCount: 25
+    })
+  );
+  posts.set(
+    "44444444-4444-4444-8444-000000000502",
+    createPostRecord({
+      id: "44444444-4444-4444-8444-000000000502",
+      user: author,
+      userId: author.id,
+      category: categories[1]!,
+      categoryId: categories[1]!.id,
+      dupeProductName: "MagSafe Ring Stand",
+      reviewText: "Desk setup essential.",
+      upvoteCount: 5
+    })
+  );
+
+  context.after(async () => {
+    await app.close();
+  });
+
+  const searchResponse = await app.inject({
+    method: "GET",
+    url: "/search?q=halo%20glow&category=beauty&sort=upvotes"
+  });
+
+  assert.equal(searchResponse.statusCode, 200);
+  assert.deepEqual(
+    searchResponse.json().posts.map((entry: { id: string }) => entry.id),
+    ["44444444-4444-4444-8444-000000000501"]
+  );
+
+  await app.inject({
+    method: "GET",
+    url: "/search?q=halo%20glow"
+  });
+  await app.inject({
+    method: "GET",
+    url: "/search?q=magsafe"
+  });
+
+  const trendingResponse = await app.inject({
+    method: "GET",
+    url: "/search/trending"
+  });
+
+  assert.equal(trendingResponse.statusCode, 200);
+  assert.deepEqual(trendingResponse.json().terms[0], {
+    term: "halo glow",
+    search_count: 2
+  });
+});
+
+test("affiliate redirect tracks the click and returns a wrapped destination", async (context) => {
+  const { app, affiliateClicks, categories, posts, users, createSession } = createTestServer();
+  const author = createUserRecord();
+  const viewer = createUserRecord({
+    id: "66666666-6666-4666-8666-666666666666",
+    username: "affiliate_viewer",
+    email: "affiliate@example.com"
+  });
+  users.set(author.id, author);
+  users.set(viewer.id, viewer);
+  const post = createPostRecord({
+    id: "44444444-4444-4444-8444-000000000601",
+    user: author,
+    userId: author.id,
+    category: categories[0]!,
+    categoryId: categories[0]!.id,
+    affiliateLink: "https://www.amazon.com/example-product",
+    affiliatePlatform: "amazon"
+  });
+  posts.set(post.id, post);
+  const session = createSession(viewer.id, viewer.email, "password", "affiliate-refresh");
+
+  context.after(async () => {
+    await app.close();
+  });
+
+  const response = await app.inject({
+    method: "GET",
+    url: `/affiliate/go/${post.id}`,
+    headers: {
+      authorization: `Bearer ${session.accessToken}`,
+      "x-session-id": "session-123"
+    }
+  });
+
+  assert.equal(response.statusCode, 302);
+  assert.equal(affiliateClicks.length, 1);
+  assert.equal(affiliateClicks[0]?.sessionId, "session-123");
+  assert.match(response.headers.location ?? "", /utm_source=dupehunt/);
+  assert.match(response.headers.location ?? "", /tag=dupehunt-20/);
+});
+
+test("admin routes require the shared key and can update moderation state plus stats", async (context) => {
+  const { app, categories, posts, users } = createTestServer();
+  const author = createUserRecord();
+  users.set(author.id, author);
+  posts.set(
+    "44444444-4444-4444-8444-000000000701",
+    createPostRecord({
+      id: "44444444-4444-4444-8444-000000000701",
+      user: author,
+      userId: author.id,
+      category: categories[0]!,
+      categoryId: categories[0]!.id,
+      status: "flagged",
+      flagCount: 6
+    })
+  );
+
+  context.after(async () => {
+    await app.close();
+  });
+
+  const unauthorizedResponse = await app.inject({
+    method: "GET",
+    url: "/admin/stats"
+  });
+
+  assert.equal(unauthorizedResponse.statusCode, 401);
+
+  const restoreResponse = await app.inject({
+    method: "PATCH",
+    url: "/admin/posts/44444444-4444-4444-8444-000000000701",
+    headers: {
+      "x-admin-key": "internal-admin-key"
+    },
+    payload: {
+      status: "active"
+    }
+  });
+
+  assert.equal(restoreResponse.statusCode, 200);
+  assert.equal(restoreResponse.json().post.status, "active");
+
+  const statsResponse = await app.inject({
+    method: "GET",
+    url: "/admin/stats",
+    headers: {
+      "x-admin-key": "internal-admin-key"
+    }
+  });
+
+  assert.equal(statsResponse.statusCode, 200);
+  assert.equal(statsResponse.json().stats.total_users, 1);
+  assert.equal(statsResponse.json().stats.active_posts, 1);
 });
 
 test("unknown routes use the shared error payload shape", async (context) => {

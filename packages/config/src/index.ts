@@ -74,6 +74,12 @@ const apiEnvironmentVariables = [
     example: "https://go.dupehunt.com"
   },
   {
+    key: "ADMIN_API_KEY",
+    required: true,
+    description: "Shared secret for internal moderation and admin API routes.",
+    example: "replace-with-an-internal-admin-secret"
+  },
+  {
     key: "OCR_SERVICE_KEY",
     required: true,
     description: "Key for the receipt OCR provider.",

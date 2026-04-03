@@ -3,6 +3,8 @@ import type { DatabaseClient } from "@dupe-hunt/db";
 export type FeedTab = "for_you" | "trending" | "new";
 export type PostMediaType = "video" | "photo";
 export type PostStatus = "active" | "flagged" | "removed";
+export type FlagReason = "spam" | "fake" | "inappropriate" | "affiliate_abuse";
+export type SearchSort = "upvotes" | "newest";
 
 export interface UserRecord {
   id: string;
@@ -108,6 +110,31 @@ export interface ListPostsInput {
   limit: number;
 }
 
+export interface SearchPostsInput {
+  query: string;
+  categoryIds?: number[];
+  verifiedOnly: boolean;
+  sort: SearchSort;
+  cursor?: string;
+  limit: number;
+}
+
+export interface SearchTermRecord {
+  term: string;
+  searchCount: number;
+}
+
+export interface AdminStatsRecord {
+  totalUsers: number;
+  totalPosts: number;
+  activePosts: number;
+  flaggedPosts: number;
+  removedPosts: number;
+  affiliateClicks: number;
+  affiliateConversions: number;
+  affiliateCommissionAmount: number;
+}
+
 export interface ApiRepository {
   findUserByEmail: (email: string) => Promise<UserRecord | null>;
   findUserById: (id: string) => Promise<UserRecord | null>;
@@ -121,6 +148,21 @@ export interface ApiRepository {
   createPost: (input: CreatePostInput) => Promise<PostRecord>;
   findPostById: (postId: string, options?: FindPostOptions) => Promise<PostRecord | null>;
   listPosts: (input: ListPostsInput) => Promise<PostRecord[]>;
+  searchPosts: (input: SearchPostsInput) => Promise<PostRecord[]>;
+  listSavedPosts: (userId: string) => Promise<PostRecord[]>;
+  followUser: (followerId: string, followingId: string) => Promise<void>;
+  unfollowUser: (followerId: string, followingId: string) => Promise<void>;
+  upvotePost: (userId: string, postId: string) => Promise<PostRecord | null>;
+  removeUpvote: (userId: string, postId: string) => Promise<PostRecord | null>;
+  downvotePost: (userId: string, postId: string) => Promise<PostRecord | null>;
+  removeDownvote: (userId: string, postId: string) => Promise<PostRecord | null>;
+  savePost: (userId: string, postId: string) => Promise<PostRecord | null>;
+  removeSavedPost: (userId: string, postId: string) => Promise<PostRecord | null>;
+  flagPost: (userId: string, postId: string, reason: FlagReason) => Promise<PostRecord | null>;
+  recordAffiliateClick: (postId: string, userId: string | null, sessionId: string) => Promise<void>;
+  listFlaggedPosts: () => Promise<PostRecord[]>;
+  updatePostStatus: (postId: string, status: PostStatus) => Promise<PostRecord | null>;
+  getAdminStats: () => Promise<AdminStatsRecord>;
   softDeletePost: (postId: string) => Promise<void>;
 }
 
@@ -240,6 +282,45 @@ const sortPosts = (posts: PostRecord[], tab: FeedTab) =>
 
     return compareDescendingString(left.id, right.id);
   });
+
+const sortSearchPosts = (posts: PostRecord[], sort: SearchSort) =>
+  [...posts].sort((left, right) => {
+    if (sort === "upvotes" && left.upvoteCount !== right.upvoteCount) {
+      return right.upvoteCount - left.upvoteCount;
+    }
+
+    const createdAtDelta = Date.parse(right.createdAt) - Date.parse(left.createdAt);
+
+    if (createdAtDelta !== 0) {
+      return createdAtDelta;
+    }
+
+    return compareDescendingString(left.id, right.id);
+  });
+
+const matchesSearchQuery = (post: PostRecord, query: string) => {
+  const normalizedQuery = query.trim().toLowerCase();
+
+  if (normalizedQuery.length === 0) {
+    return false;
+  }
+
+  const haystack = [
+    post.originalProductName,
+    post.originalBrand,
+    post.dupeProductName,
+    post.dupeBrand,
+    post.reviewText,
+    post.category.name
+  ]
+    .filter((value): value is string => Boolean(value))
+    .join(" ")
+    .toLowerCase();
+
+  return normalizedQuery
+    .split(/\s+/)
+    .every((term) => haystack.includes(term));
+};
 
 const mapUserRow = (row: UserRow): UserRecord => ({
   id: row.id,
@@ -383,6 +464,114 @@ export const createDatabaseRepository = (database: DatabaseClient): ApiRepositor
       WHERE p.status = 'active'
         AND c.is_active = TRUE
     `;
+
+  const readPostRowsById = async (postId: string, includeInactive = false) =>
+    includeInactive
+      ? database.sql<PostRow[]>`
+          SELECT ${database.sql.unsafe(postSelection)}
+          FROM posts p
+          INNER JOIN users u ON u.id = p.user_id
+          INNER JOIN categories c ON c.id = p.category_id
+          WHERE p.id = ${postId}
+          LIMIT 1
+        `
+      : database.sql<PostRow[]>`
+          SELECT ${database.sql.unsafe(postSelection)}
+          FROM posts p
+          INNER JOIN users u ON u.id = p.user_id
+          INNER JOIN categories c ON c.id = p.category_id
+          WHERE p.id = ${postId}
+            AND p.status = 'active'
+            AND c.is_active = TRUE
+          LIMIT 1
+        `;
+
+  const syncPostCounters = async (postId: string) => {
+    await database.sql`
+      UPDATE posts p
+      SET
+        upvote_count = (
+          SELECT COUNT(*)::INTEGER
+          FROM upvotes
+          WHERE post_id = p.id
+        ),
+        downvote_count = (
+          SELECT COUNT(*)::INTEGER
+          FROM downvotes
+          WHERE post_id = p.id
+        ),
+        flag_count = (
+          SELECT COUNT(*)::INTEGER
+          FROM flags
+          WHERE post_id = p.id
+        ),
+        updated_at = NOW()
+      WHERE p.id = ${postId}
+    `;
+  };
+
+  const syncUserTotalUpvotes = async (userId: string) => {
+    await database.sql`
+      UPDATE users u
+      SET total_upvotes = (
+        SELECT COALESCE(SUM(p.upvote_count), 0)::INTEGER
+        FROM posts p
+        WHERE p.user_id = u.id
+          AND p.status = 'active'
+      )
+      WHERE u.id = ${userId}
+    `;
+  };
+
+  const adjustCategoryCount = async (categoryId: number, delta: number) => {
+    if (delta === 0) {
+      return;
+    }
+
+    await database.sql`
+      UPDATE categories
+      SET post_count = GREATEST(post_count + ${delta}, 0)
+      WHERE id = ${categoryId}
+    `;
+  };
+
+  const updatePostStatusInternal = async (postId: string, nextStatus: PostStatus) => {
+    const currentRows = await database.sql<{ status: PostStatus; category_id: number; user_id: string }[]>`
+      SELECT status, category_id, user_id
+      FROM posts
+      WHERE id = ${postId}
+      LIMIT 1
+    `;
+    const current = currentRows[0];
+
+    if (!current) {
+      return null;
+    }
+
+    if (current.status !== nextStatus) {
+      await database.sql`
+        UPDATE posts
+        SET
+          status = ${nextStatus},
+          updated_at = NOW()
+        WHERE id = ${postId}
+      `;
+
+      if (current.status === "active" && nextStatus !== "active") {
+        await adjustCategoryCount(current.category_id, -1);
+      } else if (current.status !== "active" && nextStatus === "active") {
+        await adjustCategoryCount(current.category_id, 1);
+      }
+    }
+
+    const post = await readPostRowsById(postId, true).then((rows) => (rows[0] ? mapPostRow(rows[0]) : null));
+
+    if (post) {
+      await syncUserTotalUpvotes(post.userId);
+    }
+
+    return post;
+  };
 
   return {
     findUserByEmail: async (email) => {
@@ -561,25 +750,7 @@ export const createDatabaseRepository = (database: DatabaseClient): ApiRepositor
       return post;
     },
     findPostById: async (postId, options = {}) => {
-      const rows = options.includeInactive
-        ? await database.sql<PostRow[]>`
-            SELECT ${database.sql.unsafe(postSelection)}
-            FROM posts p
-            INNER JOIN users u ON u.id = p.user_id
-            INNER JOIN categories c ON c.id = p.category_id
-            WHERE p.id = ${postId}
-            LIMIT 1
-          `
-        : await database.sql<PostRow[]>`
-            SELECT ${database.sql.unsafe(postSelection)}
-            FROM posts p
-            INNER JOIN users u ON u.id = p.user_id
-            INNER JOIN categories c ON c.id = p.category_id
-            WHERE p.id = ${postId}
-              AND p.status = 'active'
-              AND c.is_active = TRUE
-            LIMIT 1
-          `;
+      const rows = await readPostRowsById(postId, options.includeInactive ?? false);
 
       return rows[0] ? mapPostRow(rows[0]) : null;
     },
@@ -622,26 +793,281 @@ export const createDatabaseRepository = (database: DatabaseClient): ApiRepositor
 
       return sorted.slice(cursorIndex + 1, cursorIndex + 1 + input.limit);
     },
-    softDeletePost: async (postId) => {
-      const rows = await database.sql<{ category_id: number }[]>`
-        UPDATE posts
-        SET
-          status = 'removed',
-          updated_at = NOW()
-        WHERE id = ${postId}
-          AND status <> 'removed'
-        RETURNING category_id
+    searchPosts: async (input) => {
+      const categoryIds = input.categoryIds ? Array.from(new Set(input.categoryIds)) : undefined;
+
+      if (categoryIds && categoryIds.length === 0) {
+        return [];
+      }
+
+      const filtered = (await readActivePostRows())
+        .map(mapPostRow)
+        .filter((post) => {
+          if (!matchesSearchQuery(post, input.query)) {
+            return false;
+          }
+
+          if (input.verifiedOnly && !post.isVerifiedBuy) {
+            return false;
+          }
+
+          if (categoryIds && !categoryIds.includes(post.categoryId)) {
+            return false;
+          }
+
+          return true;
+        });
+      const sorted = sortSearchPosts(filtered, input.sort);
+
+      if (!input.cursor) {
+        return sorted.slice(0, input.limit);
+      }
+
+      const cursorIndex = sorted.findIndex((post) => post.id === input.cursor);
+
+      return cursorIndex === -1 ? [] : sorted.slice(cursorIndex + 1, cursorIndex + 1 + input.limit);
+    },
+    listSavedPosts: async (userId) => {
+      const rows = await database.sql<PostRow[]>`
+        SELECT ${database.sql.unsafe(postSelection)}
+        FROM saves s
+        INNER JOIN posts p ON p.id = s.post_id
+        INNER JOIN users u ON u.id = p.user_id
+        INNER JOIN categories c ON c.id = p.category_id
+        WHERE s.user_id = ${userId}
+          AND p.status = 'active'
+          AND c.is_active = TRUE
+        ORDER BY s.created_at DESC, p.created_at DESC, p.id DESC
       `;
 
-      const categoryId = rows[0]?.category_id;
+      return rows.map(mapPostRow);
+    },
+    followUser: async (followerId, followingId) => {
+      await database.sql`
+        INSERT INTO follows (follower_id, following_id)
+        VALUES (${followerId}, ${followingId})
+        ON CONFLICT (follower_id, following_id) DO NOTHING
+      `;
+    },
+    unfollowUser: async (followerId, followingId) => {
+      await database.sql`
+        DELETE FROM follows
+        WHERE follower_id = ${followerId}
+          AND following_id = ${followingId}
+      `;
+    },
+    upvotePost: async (userId, postId) => {
+      const existingPost = await readPostRowsById(postId, false).then((rows) => (rows[0] ? mapPostRow(rows[0]) : null));
 
-      if (categoryId) {
-        await database.sql`
-          UPDATE categories
-          SET post_count = GREATEST(post_count - 1, 0)
-          WHERE id = ${categoryId}
-        `;
+      if (!existingPost) {
+        return null;
       }
+
+      await database.sql`
+        INSERT INTO upvotes (user_id, post_id)
+        VALUES (${userId}, ${postId})
+        ON CONFLICT (user_id, post_id) DO NOTHING
+      `;
+      await database.sql`
+        DELETE FROM downvotes
+        WHERE user_id = ${userId}
+          AND post_id = ${postId}
+      `;
+      await syncPostCounters(postId);
+      await syncUserTotalUpvotes(existingPost.userId);
+
+      return readPostRowsById(postId, true).then((rows) => (rows[0] ? mapPostRow(rows[0]) : null));
+    },
+    removeUpvote: async (userId, postId) => {
+      const existingPost = await readPostRowsById(postId, false).then((rows) => (rows[0] ? mapPostRow(rows[0]) : null));
+
+      if (!existingPost) {
+        return null;
+      }
+
+      await database.sql`
+        DELETE FROM upvotes
+        WHERE user_id = ${userId}
+          AND post_id = ${postId}
+      `;
+      await syncPostCounters(postId);
+      await syncUserTotalUpvotes(existingPost.userId);
+
+      return readPostRowsById(postId, true).then((rows) => (rows[0] ? mapPostRow(rows[0]) : null));
+    },
+    downvotePost: async (userId, postId) => {
+      const existingPost = await readPostRowsById(postId, false).then((rows) => (rows[0] ? mapPostRow(rows[0]) : null));
+
+      if (!existingPost) {
+        return null;
+      }
+
+      await database.sql`
+        INSERT INTO downvotes (user_id, post_id)
+        VALUES (${userId}, ${postId})
+        ON CONFLICT (user_id, post_id) DO NOTHING
+      `;
+      await database.sql`
+        DELETE FROM upvotes
+        WHERE user_id = ${userId}
+          AND post_id = ${postId}
+      `;
+      await syncPostCounters(postId);
+      await syncUserTotalUpvotes(existingPost.userId);
+
+      return readPostRowsById(postId, true).then((rows) => (rows[0] ? mapPostRow(rows[0]) : null));
+    },
+    removeDownvote: async (userId, postId) => {
+      const existingPost = await readPostRowsById(postId, false).then((rows) => (rows[0] ? mapPostRow(rows[0]) : null));
+
+      if (!existingPost) {
+        return null;
+      }
+
+      await database.sql`
+        DELETE FROM downvotes
+        WHERE user_id = ${userId}
+          AND post_id = ${postId}
+      `;
+      await syncPostCounters(postId);
+      await syncUserTotalUpvotes(existingPost.userId);
+
+      return readPostRowsById(postId, true).then((rows) => (rows[0] ? mapPostRow(rows[0]) : null));
+    },
+    savePost: async (userId, postId) => {
+      const existingPost = await readPostRowsById(postId, false).then((rows) => (rows[0] ? mapPostRow(rows[0]) : null));
+
+      if (!existingPost) {
+        return null;
+      }
+
+      await database.sql`
+        INSERT INTO saves (user_id, post_id)
+        VALUES (${userId}, ${postId})
+        ON CONFLICT (user_id, post_id) DO NOTHING
+      `;
+
+      return existingPost;
+    },
+    removeSavedPost: async (userId, postId) => {
+      const existingPost = await readPostRowsById(postId, false).then((rows) => (rows[0] ? mapPostRow(rows[0]) : null));
+
+      if (!existingPost) {
+        return null;
+      }
+
+      await database.sql`
+        DELETE FROM saves
+        WHERE user_id = ${userId}
+          AND post_id = ${postId}
+      `;
+
+      return existingPost;
+    },
+    flagPost: async (userId, postId, reason) => {
+      const existingPost = await readPostRowsById(postId, false).then((rows) => (rows[0] ? mapPostRow(rows[0]) : null));
+
+      if (!existingPost) {
+        return null;
+      }
+
+      const existingFlagRows = await database.sql<{ id: string }[]>`
+        SELECT id
+        FROM flags
+        WHERE user_id = ${userId}
+          AND post_id = ${postId}
+        LIMIT 1
+      `;
+
+      if (existingFlagRows[0]) {
+        throw Object.assign(new Error("You have already flagged this post."), {
+          statusCode: 409,
+          code: "POST_ALREADY_FLAGGED"
+        });
+      }
+
+      await database.sql`
+        INSERT INTO flags (user_id, post_id, reason)
+        VALUES (${userId}, ${postId}, ${reason})
+      `;
+      await syncPostCounters(postId);
+      const flaggedPost = await readPostRowsById(postId, true).then((rows) => (rows[0] ? mapPostRow(rows[0]) : null));
+
+      if (!flaggedPost) {
+        return null;
+      }
+
+      await syncUserTotalUpvotes(flaggedPost.userId);
+
+      if (flaggedPost.status === "active" && flaggedPost.flagCount >= 5) {
+        return updatePostStatusInternal(postId, "flagged");
+      }
+
+      return flaggedPost;
+    },
+    recordAffiliateClick: async (postId, userId, sessionId) => {
+      await database.sql`
+        INSERT INTO affiliate_clicks (post_id, user_id, session_id, affiliate_platform)
+        SELECT id, ${userId}, ${sessionId}, affiliate_platform
+        FROM posts
+        WHERE id = ${postId}
+      `;
+    },
+    listFlaggedPosts: async () => {
+      const rows = await database.sql<PostRow[]>`
+        SELECT ${database.sql.unsafe(postSelection)}
+        FROM posts p
+        INNER JOIN users u ON u.id = p.user_id
+        INNER JOIN categories c ON c.id = p.category_id
+        WHERE p.status = 'flagged'
+        ORDER BY p.flag_count DESC, p.created_at DESC, p.id DESC
+      `;
+
+      return rows.map(mapPostRow);
+    },
+    updatePostStatus: async (postId, status) => updatePostStatusInternal(postId, status),
+    getAdminStats: async () => {
+      const [postCounts] = await database.sql<
+        Array<{ total_posts: number; active_posts: number; flagged_posts: number; removed_posts: number }>
+      >`
+        SELECT
+          COUNT(*)::INTEGER AS total_posts,
+          COUNT(*) FILTER (WHERE status = 'active')::INTEGER AS active_posts,
+          COUNT(*) FILTER (WHERE status = 'flagged')::INTEGER AS flagged_posts,
+          COUNT(*) FILTER (WHERE status = 'removed')::INTEGER AS removed_posts
+        FROM posts
+      `;
+      const [userCounts] = await database.sql<Array<{ total_users: number }>>`
+        SELECT COUNT(*)::INTEGER AS total_users
+        FROM users
+      `;
+      const [affiliateCounts] = await database.sql<
+        Array<{
+          affiliate_clicks: number;
+          affiliate_conversions: number;
+          affiliate_commission_amount: number | string | null;
+        }>
+      >`
+        SELECT
+          COUNT(*)::INTEGER AS affiliate_clicks,
+          COUNT(*) FILTER (WHERE converted_at IS NOT NULL)::INTEGER AS affiliate_conversions,
+          COALESCE(SUM(commission_amount), 0) AS affiliate_commission_amount
+        FROM affiliate_clicks
+      `;
+
+      return {
+        totalUsers: userCounts?.total_users ?? 0,
+        totalPosts: postCounts?.total_posts ?? 0,
+        activePosts: postCounts?.active_posts ?? 0,
+        flaggedPosts: postCounts?.flagged_posts ?? 0,
+        removedPosts: postCounts?.removed_posts ?? 0,
+        affiliateClicks: affiliateCounts?.affiliate_clicks ?? 0,
+        affiliateConversions: affiliateCounts?.affiliate_conversions ?? 0,
+        affiliateCommissionAmount: Number(affiliateCounts?.affiliate_commission_amount ?? 0)
+      };
+    },
+    softDeletePost: async (postId) => {
+      await updatePostStatusInternal(postId, "removed");
     }
   };
 };

@@ -16,6 +16,7 @@ export interface ApiConfig {
   typesenseHost: string;
   typesenseApiKey: string;
   affiliateWrappingDomain: string;
+  adminApiKey: string;
   ocrServiceKey: string;
   port: number;
   nodeEnv: NodeEnvironment;
@@ -67,6 +68,7 @@ export const loadApiConfig = (source: EnvironmentSource = process.env): ApiConfi
     typesenseHost: requireValidUrl(environment.TYPESENSE_HOST, "TYPESENSE_HOST"),
     typesenseApiKey: environment.TYPESENSE_API_KEY,
     affiliateWrappingDomain: requireValidUrl(environment.AFFILIATE_WRAPPING_DOMAIN, "AFFILIATE_WRAPPING_DOMAIN"),
+    adminApiKey: environment.ADMIN_API_KEY,
     ocrServiceKey: environment.OCR_SERVICE_KEY,
     port: requirePort(environment.PORT),
     nodeEnv: requireNodeEnv(environment.NODE_ENV)

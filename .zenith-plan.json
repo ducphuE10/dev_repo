@@ -95,8 +95,8 @@
         "Affiliate redirect tracking and admin endpoints are covered by automated tests."
       ],
       "priority": 7,
-      "status": "pending",
-      "completed_in_iteration": null
+      "status": "completed",
+      "completed_in_iteration": 5
     },
     {
       "id": "ST-8",
