@@ -1,0 +1,9 @@
+{
+  "name": "@dupe-hunt/web",
+  "version": "0.0.0",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "dev": "node ../../scripts/dev-stub.mjs web"
+  }
+}

@@ -1,0 +1,21 @@
+{
+  "name": "dupe-hunt",
+  "version": "0.1.0",
+  "private": true,
+  "packageManager": "pnpm@10.26.1",
+  "engines": {
+    "node": ">=20.0.0",
+    "pnpm": ">=9.0.0"
+  },
+  "scripts": {
+    "dev": "turbo run dev --filter=@dupe-hunt/api --filter=@dupe-hunt/web --filter=@dupe-hunt/mobile",
+    "lint": "node ./scripts/lint-workspace.mjs",
+    "typecheck": "tsc --noEmit --project tsconfig.json",
+    "test": "node --test ./scripts/workspace.test.mjs"
+  },
+  "devDependencies": {
+    "@types/node": "^24.5.2",
+    "turbo": "^2.5.8",
+    "typescript": "^5.9.2"
+  }
+}
