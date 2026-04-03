@@ -1,0 +1,20 @@
+{
+  "expo": {
+    "name": "Dupe Hunt",
+    "slug": "dupe-hunt",
+    "scheme": "dupehunt",
+    "version": "0.1.0",
+    "orientation": "portrait",
+    "userInterfaceStyle": "light",
+    "backgroundColor": "#F8EFE6",
+    "ios": {
+      "supportsTablet": true
+    },
+    "android": {
+      "adaptiveIcon": {
+        "backgroundColor": "#F8EFE6"
+      }
+    },
+    "assetBundlePatterns": ["**/*"]
+  }
+}

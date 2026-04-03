@@ -108,8 +108,8 @@
         "Auth token storage and API client plumbing exist without embedding business logic in screens."
       ],
       "priority": 8,
-      "status": "pending",
-      "completed_in_iteration": null
+      "status": "completed",
+      "completed_in_iteration": 6
     },
     {
       "id": "ST-9",

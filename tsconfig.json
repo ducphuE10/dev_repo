@@ -2,11 +2,14 @@
   "extends": "./packages/config/typescript/base.json",
   "compilerOptions": {
     "baseUrl": ".",
+    "jsx": "react-jsx",
+    "lib": ["ES2022", "DOM"],
     "paths": {
       "@dupe-hunt/config": ["packages/config/src/index.ts"],
       "@dupe-hunt/db": ["packages/db/src/index.ts"],
       "@dupe-hunt/types": ["packages/types/src/index.ts"]
-    }
+    },
+    "types": ["node", "react"]
   },
-  "include": ["apps/**/*.ts", "packages/**/*.ts"]
+  "include": ["apps/**/*.ts", "apps/**/*.tsx", "packages/**/*.ts"]
 }

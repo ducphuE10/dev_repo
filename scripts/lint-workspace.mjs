@@ -44,6 +44,28 @@ for (const relativePath of requiredApiArtifacts) {
   await readFile(path.join(rootDir, relativePath), "utf8");
 }
 
+const requiredMobileArtifacts = [
+  "apps/mobile/app.json",
+  "apps/mobile/tsconfig.json",
+  "apps/mobile/App.tsx",
+  "apps/mobile/src/providers/AppProviders.tsx",
+  "apps/mobile/src/auth/AuthSessionProvider.tsx",
+  "apps/mobile/src/navigation/index.tsx",
+  "apps/mobile/src/components/PrimaryButton.tsx",
+  "apps/mobile/src/components/ScreenFrame.tsx",
+  "apps/mobile/src/hooks/useApiClient.ts",
+  "apps/mobile/src/hooks/useCategoryOptionsQuery.ts",
+  "apps/mobile/src/hooks/useFeedPreviewQuery.ts",
+  "apps/mobile/src/lib/api.ts",
+  "apps/mobile/src/screens/AuthScreens.tsx",
+  "apps/mobile/src/screens/OnboardingScreens.tsx",
+  "apps/mobile/src/screens/MainScreens.tsx"
+];
+
+for (const relativePath of requiredMobileArtifacts) {
+  await readFile(path.join(rootDir, relativePath), "utf8");
+}
+
 const requiredDatabaseArtifacts = [
   "docker-compose.yml",
   "packages/db/scripts/migrate.mjs",
@@ -65,5 +87,5 @@ for (const relativePath of requiredDatabaseArtifacts) {
 }
 
 console.log(
-  `Workspace lint passed for ${expectedWorkspaces.length} packages, ${envExamplePaths.length} env examples, ${requiredApiArtifacts.length} API artifacts, and ${requiredDatabaseArtifacts.length} database artifacts.`
+  `Workspace lint passed for ${expectedWorkspaces.length} packages, ${envExamplePaths.length} env examples, ${requiredApiArtifacts.length} API artifacts, ${requiredMobileArtifacts.length} mobile artifacts, and ${requiredDatabaseArtifacts.length} database artifacts.`
 );

@@ -3,7 +3,30 @@
   "version": "0.0.0",
   "private": true,
   "type": "module",
+  "main": "expo/AppEntry",
   "scripts": {
-    "dev": "node ../../scripts/dev-stub.mjs mobile"
+    "dev": "expo start --clear",
+    "start": "expo start --clear",
+    "android": "expo run:android",
+    "ios": "expo run:ios"
+  },
+  "dependencies": {
+    "@dupe-hunt/config": "workspace:*",
+    "@dupe-hunt/types": "workspace:*",
+    "@react-navigation/bottom-tabs": "^7.15.9",
+    "@react-navigation/native": "^7.2.2",
+    "@react-navigation/native-stack": "^7.14.10",
+    "@tanstack/react-query": "^5.96.2",
+    "expo": "^55.0.11",
+    "expo-secure-store": "^55.0.11",
+    "expo-status-bar": "^55.0.5",
+    "react": "^19.2.4",
+    "react-native": "^0.84.1",
+    "react-native-gesture-handler": "^2.31.0",
+    "react-native-safe-area-context": "^5.7.0",
+    "react-native-screens": "^4.24.0"
+  },
+  "devDependencies": {
+    "@types/react": "^19.2.14"
   }
 }

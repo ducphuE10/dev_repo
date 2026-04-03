@@ -71,6 +71,27 @@ test("api workspace exposes a runnable Fastify scaffold", async () => {
   assert.match(testSource, /buildApiServer/);
 });
 
+test("mobile workspace exposes an Expo shell with centralized navigation and session plumbing", async () => {
+  const manifest = JSON.parse(await readFile(path.join(rootDir, "apps/mobile/package.json"), "utf8"));
+  const appJson = JSON.parse(await readFile(path.join(rootDir, "apps/mobile/app.json"), "utf8"));
+  const appSource = await readFile(path.join(rootDir, "apps/mobile/App.tsx"), "utf8");
+  const navigationSource = await readFile(path.join(rootDir, "apps/mobile/src/navigation/index.tsx"), "utf8");
+  const authSource = await readFile(path.join(rootDir, "apps/mobile/src/auth/AuthSessionProvider.tsx"), "utf8");
+  const apiSource = await readFile(path.join(rootDir, "apps/mobile/src/lib/api.ts"), "utf8");
+
+  assert.equal(manifest.main, "expo/AppEntry");
+  assert.equal(manifest.scripts.dev, "expo start --clear");
+  assert.equal(manifest.dependencies.expo, "^55.0.11");
+  assert.equal(manifest.dependencies["@tanstack/react-query"], "^5.96.2");
+  assert.equal(appJson.expo.slug, "dupe-hunt");
+  assert.match(appSource, /GestureHandlerRootView/);
+  assert.match(navigationSource, /createBottomTabNavigator/);
+  assert.match(navigationSource, /createNativeStackNavigator/);
+  assert.match(authSource, /expo-secure-store/);
+  assert.match(authSource, /dupe-hunt\.mobile\.session/);
+  assert.match(apiSource, /parseEnvironment\(mobileEnvironmentContract/);
+});
+
 test("database workspace exposes drizzle schema and migration workflow", async () => {
   const manifest = JSON.parse(await readFile(path.join(rootDir, "packages/db/package.json"), "utf8"));
   const schemaSource = await readFile(path.join(rootDir, "packages/db/src/schema.ts"), "utf8");
