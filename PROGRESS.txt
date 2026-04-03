@@ -1,0 +1,36 @@
+## Codebase Patterns
+(Add reusable patterns here as they are discovered during implementation)
+
+- Feed queries must always filter `status = 'active'` — never return flagged/removed posts
+- Affiliate click tracking happens server-side in the redirect endpoint, never in the frontend
+- Always use `IF NOT EXISTS` for migration SQL statements
+- Receipt images live in the private R2 bucket only — never expose receipt URLs to clients
+- Background worker jobs (BullMQ) handle all heavy async work: video processing, OCR, counter updates
+- Aggregation counters (upvote_count, flag_count) are updated via worker jobs, not inline in request handlers
+
+---
+
+## [2026-04-02 09:00] - Project Kickoff / Design & Planning
+
+### What was implemented
+- Full product brainstorming session — identified Dupe Hunt as the core concept
+- Competitive landscape research (Dupe.com, Brandefy, SkinSort, Skinskool)
+- Confirmed market gap: no community-first, multi-category, verified dupe platform exists
+- All key product decisions made: platform, categories, content format, monetization, verification, discovery
+
+### Files changed
+- `docs/design.md` — full product design spec (vision, features, monetization, growth, KPIs, MVP scope)
+- `docs/technical.md` — DB schema, API endpoints, mobile screen map, affiliate flow, receipt verification
+- `docs/plan.md` — 10-phase implementation plan with task checklists (~10 weeks)
+- `README.md` — project overview, stack, repo structure, getting started
+- `DEV_RULES.md` — contribution rules for developers and AI agents
+- `PROGRESS.txt` — this file
+
+### Learnings for future iterations
+- The core differentiator vs competitors is community trust (real people, verified purchases) — never compromise this in product decisions
+- Multi-category from day 1 requires strong category filtering UX from the start — don't let the feed become a mess
+- The "For You" tab in v1 is category-filtered + upvote-ranked, NOT an ML algorithm — keep it simple and deterministic
+- Affiliate revenue starts day 1; brand analytics is a v2 B2B play — don't mix up the timelines
+- Receipt images are privacy-sensitive — always treat them as private-bucket-only assets
+
+---
