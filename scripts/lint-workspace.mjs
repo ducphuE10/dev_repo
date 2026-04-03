@@ -27,4 +27,12 @@ for (const [workspacePath, expectedName] of expectedWorkspaces) {
   await readFile(sourcePath, "utf8");
 }
 
-console.log(`Workspace lint passed for ${expectedWorkspaces.length} packages.`);
+const envExamplePaths = ["apps/api/.env.example", "apps/web/.env.example", "apps/mobile/.env.example"];
+
+for (const relativePath of envExamplePaths) {
+  await readFile(path.join(rootDir, relativePath), "utf8");
+}
+
+console.log(
+  `Workspace lint passed for ${expectedWorkspaces.length} packages and ${envExamplePaths.length} env examples.`
+);

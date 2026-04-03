@@ -21,3 +21,34 @@ test("pnpm workspace includes app and package globs", async () => {
   assert.match(workspaceYaml, /apps\/\*/);
   assert.match(workspaceYaml, /packages\/\*/);
 });
+
+test("shared config package exports reusable TypeScript config", async () => {
+  const manifest = JSON.parse(await readFile(path.join(rootDir, "packages/config/package.json"), "utf8"));
+  const sharedTsconfig = JSON.parse(
+    await readFile(path.join(rootDir, "packages/config/typescript/base.json"), "utf8")
+  );
+  const rootTsconfig = JSON.parse(await readFile(path.join(rootDir, "tsconfig.json"), "utf8"));
+
+  assert.equal(manifest.exports["./typescript/base"], "./typescript/base.json");
+  assert.equal(sharedTsconfig.compilerOptions.strict, true);
+  assert.equal(rootTsconfig.extends, "./packages/config/typescript/base.json");
+});
+
+test("app environment examples exist for api, web, and mobile", async () => {
+  const expectedExamples = [
+    ["apps/api/.env.example", ["DATABASE_URL", "REDIS_URL", "PORT", "NODE_ENV"]],
+    ["apps/web/.env.example", ["NEXT_PUBLIC_API_URL", "NEXT_PUBLIC_APP_URL"]],
+    [
+      "apps/mobile/.env.example",
+      ["EXPO_PUBLIC_API_URL", "EXPO_PUBLIC_SUPABASE_URL", "EXPO_PUBLIC_SUPABASE_ANON_KEY"]
+    ]
+  ];
+
+  for (const [relativePath, expectedKeys] of expectedExamples) {
+    const fileContents = await readFile(path.join(rootDir, relativePath), "utf8");
+
+    for (const key of expectedKeys) {
+      assert.match(fileContents, new RegExp(`^${key}=`, "m"));
+    }
+  }
+});

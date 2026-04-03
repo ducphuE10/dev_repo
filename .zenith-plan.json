@@ -30,8 +30,8 @@
         "Environment example files or validation contracts exist for api, web, and mobile."
       ],
       "priority": 2,
-      "status": "pending",
-      "completed_in_iteration": null
+      "status": "completed",
+      "completed_in_iteration": 3
     },
     {
       "id": "ST-3",
