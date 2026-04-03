@@ -1,0 +1,11 @@
+{
+  "extends": "./packages/config/typescript/base.json",
+  "compilerOptions": {
+    "baseUrl": ".",
+    "paths": {
+      "@dupe-hunt/config": ["packages/config/src/index.ts"],
+      "@dupe-hunt/types": ["packages/types/src/index.ts"]
+    }
+  },
+  "include": ["apps/**/*.ts", "packages/**/*.ts"]
+}

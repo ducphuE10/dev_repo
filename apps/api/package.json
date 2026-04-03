@@ -1,0 +1,9 @@
+{
+  "name": "@dupe-hunt/api",
+  "version": "0.0.0",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "dev": "node ../../scripts/dev-stub.mjs api"
+  }
+}

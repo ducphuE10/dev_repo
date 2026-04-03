@@ -1,0 +1,172 @@
+{
+  "version": 1,
+  "task_summary": "Build Dupe Hunt from its current docs-only state into a working community-powered dupe discovery platform with a pnpm/Turborepo TypeScript monorepo, Fastify API, Expo mobile app, and Next.js SEO web layer.",
+  "quality_commands": {
+    "lint": "pnpm lint",
+    "typecheck": "pnpm typecheck",
+    "test": "pnpm test"
+  },
+  "subtasks": [
+    {
+      "id": "ST-1",
+      "title": "Bootstrap the monorepo workspace",
+      "description": "Create the root pnpm/Turborepo TypeScript workspace so the documented repo structure exists and later iterations have real test, lint, and typecheck entry points.",
+      "acceptance_criteria": [
+        "Root workspace files exist for pnpm and Turborepo orchestration.",
+        "The documented apps/ and packages/ directories are scaffolded with minimal manifests.",
+        "Root-level scripts for development and quality checks are defined and runnable."
+      ],
+      "priority": 1,
+      "status": "completed",
+      "completed_in_iteration": 2
+    },
+    {
+      "id": "ST-2",
+      "title": "Establish shared config, types, and environment contracts",
+      "description": "Create the shared packages and base TypeScript, lint, and environment-validation patterns that the apps will consume.",
+      "acceptance_criteria": [
+        "packages/config and packages/types exist with reusable exports.",
+        "Strict TypeScript configuration is shared across the workspace.",
+        "Environment example files or validation contracts exist for api, web, and mobile."
+      ],
+      "priority": 2,
+      "status": "completed",
+      "completed_in_iteration": 3
+    },
+    {
+      "id": "ST-3",
+      "title": "Model the database package and local data infrastructure",
+      "description": "Implement packages/db with Drizzle schema, sequential migrations, seed data for categories, and local infrastructure configuration for PostgreSQL and Redis.",
+      "acceptance_criteria": [
+        "packages/db contains schema definitions aligned to docs/technical.md.",
+        "Sequential migration files exist for the MVP tables and seed categories.",
+        "A documented local workflow exists to run migrations against development services."
+      ],
+      "priority": 3,
+      "status": "pending",
+      "completed_in_iteration": null
+    },
+    {
+      "id": "ST-4",
+      "title": "Scaffold the Fastify API application",
+      "description": "Create the API app with health checks, config loading, shared error handling, Redis/Postgres wiring, and a test harness that future endpoint work can extend.",
+      "acceptance_criteria": [
+        "apps/api starts successfully and exposes a health endpoint.",
+        "Fastify plugins handle config, database access, and consistent error responses.",
+        "API tests can run in isolation with the chosen test framework."
+      ],
+      "priority": 4,
+      "status": "pending",
+      "completed_in_iteration": null
+    },
+    {
+      "id": "ST-5",
+      "title": "Implement auth, users, and categories API flows",
+      "description": "Add Supabase-backed auth, JWT protection, user profile routes, category listing, and user category preference management with integration coverage.",
+      "acceptance_criteria": [
+        "Auth endpoints exist for register, login, logout, refresh, and OAuth callbacks.",
+        "User and category endpoints return real database-backed data with validation.",
+        "Integration tests cover success and failure paths for auth and user/category flows."
+      ],
+      "priority": 5,
+      "status": "pending",
+      "completed_in_iteration": null
+    },
+    {
+      "id": "ST-6",
+      "title": "Implement media upload, posts, and feed ranking APIs",
+      "description": "Build media upload signing, post CRUD, deterministic feed queries, and BullMQ worker wiring for video and affiliate background jobs.",
+      "acceptance_criteria": [
+        "Authenticated users can obtain media upload URLs and create posts.",
+        "GET /posts and GET /posts/:id implement the documented filters, pagination, and ranking rules.",
+        "Integration tests cover post creation, deletion, and feed retrieval."
+      ],
+      "priority": 6,
+      "status": "pending",
+      "completed_in_iteration": null
+    },
+    {
+      "id": "ST-7",
+      "title": "Implement social, search, affiliate, and admin API surfaces",
+      "description": "Add upvotes, downvotes, saves, flags, follow flows, Typesense-backed search, affiliate redirect tracking, and internal moderation/admin endpoints.",
+      "acceptance_criteria": [
+        "Social interaction endpoints update persisted state and trigger the documented worker jobs.",
+        "Search endpoints return filtered results and trending terms.",
+        "Affiliate redirect tracking and admin endpoints are covered by automated tests."
+      ],
+      "priority": 7,
+      "status": "pending",
+      "completed_in_iteration": null
+    },
+    {
+      "id": "ST-8",
+      "title": "Scaffold the Expo mobile application shell",
+      "description": "Create the mobile app foundation with navigation, auth state, React Query client setup, API client utilities, and shared screen/component folders that match repo conventions.",
+      "acceptance_criteria": [
+        "apps/mobile boots with Expo and TypeScript configuration.",
+        "Navigation is centralized under apps/mobile/src/navigation.",
+        "Auth token storage and API client plumbing exist without embedding business logic in screens."
+      ],
+      "priority": 8,
+      "status": "pending",
+      "completed_in_iteration": null
+    },
+    {
+      "id": "ST-9",
+      "title": "Deliver mobile auth, onboarding, and feed experience",
+      "description": "Implement the initial user-facing mobile flow from welcome through category selection into the feed and dupe detail screens.",
+      "acceptance_criteria": [
+        "Users can register or sign in, complete onboarding, and persist category preferences.",
+        "Feed tabs, category filters, infinite scrolling, and dupe detail navigation work against the API.",
+        "The mobile app handles loading, empty, and basic error states for the implemented screens."
+      ],
+      "priority": 9,
+      "status": "pending",
+      "completed_in_iteration": null
+    },
+    {
+      "id": "ST-10",
+      "title": "Deliver mobile post creation and profile/social screens",
+      "description": "Implement the camera/gallery post flow, preview and publish path, plus profile, saved items, and core social interactions in the mobile app.",
+      "acceptance_criteria": [
+        "Users can capture or select media, complete the form, and publish a post.",
+        "Profile, saved collection, and public profile screens render real API data.",
+        "Optimistic UI exists for upvote, save, and follow interactions."
+      ],
+      "priority": 10,
+      "status": "pending",
+      "completed_in_iteration": null
+    },
+    {
+      "id": "ST-11",
+      "title": "Build the Next.js browse and SEO web layer",
+      "description": "Create the browse-only web experience with SSR category, post, user, and search pages, metadata generation, affiliate redirect handling, and responsive layouts.",
+      "acceptance_criteria": [
+        "The web app renders the documented SEO routes with server-side data fetching.",
+        "Each public page provides metadata and supports social sharing previews.",
+        "Web users can browse posts and trigger affiliate redirects, but cannot create posts."
+      ],
+      "priority": 11,
+      "status": "pending",
+      "completed_in_iteration": null
+    },
+    {
+      "id": "ST-12",
+      "title": "Add receipt verification, moderation, CI, and launch hardening",
+      "description": "Finish the MVP with receipt OCR flows, moderation rules and admin queue, CI quality gates, monitoring hooks, and product polish needed for beta launch.",
+      "acceptance_criteria": [
+        "Receipt upload and verification status flow work without exposing private receipt URLs.",
+        "Moderation, abuse limits, and launch-quality UX safeguards are implemented.",
+        "CI runs the workspace quality commands and the repo documents a beta-ready release path."
+      ],
+      "priority": 12,
+      "status": "pending",
+      "completed_in_iteration": null
+    }
+  ],
+  "discovered_issues": [
+    "The repository is currently docs-only: the documented apps/, packages/, package.json, pnpm-workspace.yaml, and turbo.json files do not exist yet.",
+    "No test, lint, or typecheck commands are currently configured, so quality_commands is intentionally empty until the workspace bootstrap is implemented.",
+    "README setup and dev commands are aspirational in the current branch and will fail until the initial scaffold exists."
+  ]
+}

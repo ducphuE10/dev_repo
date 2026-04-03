@@ -34,3 +34,44 @@
 - Receipt images are privacy-sensitive — always treat them as private-bucket-only assets
 
 ---
+
+## [2026-04-03 08:33] - Iteration 1 / Planning Baseline
+
+### What was implemented
+- Audited the repository to confirm the current branch is documentation-only
+- Created `.zenith-plan.json` with dependency-ordered implementation subtasks for the full MVP
+- Created `.zenith-progress.md` with consolidated codebase patterns for future iterations
+
+### Files changed
+- `.zenith-plan.json` — iteration plan, discovered issues, and currently available quality command inventory
+- `.zenith-progress.md` — first-pass codebase patterns and architectural constraints
+- `PROGRESS.txt` — appended this planning record
+
+### Learnings for future iterations
+- The first real implementation task is workspace bootstrap, because the repo currently has no package manager or app scaffolding to extend
+- Quality commands cannot be recorded until ST-1 creates real package scripts and tool configuration
+- The docs are internally consistent enough to drive implementation, but the README currently describes a future state rather than the checked-in state
+
+---
+
+## [2026-04-03 08:28] - Iteration 2 / ST-1 Workspace Bootstrap
+
+### What was implemented
+- Bootstrapped the root pnpm workspace with `package.json`, `pnpm-workspace.yaml`, `turbo.json`, `tsconfig.json`, and a generated lockfile
+- Scaffolded the documented `apps/api`, `apps/web`, `apps/mobile`, `packages/config`, `packages/types`, and `packages/db` directories with minimal manifests and TypeScript entry files
+- Added lightweight workspace verification scripts so `pnpm lint`, `pnpm typecheck`, and `pnpm test` are now real commands instead of future placeholders
+- Added app-level `dev` stubs so `pnpm dev` launches all three application workspaces during bootstrap
+
+### Files changed
+- `.gitignore` — ignores workspace-generated artifacts and local environment files
+- `package.json`, `pnpm-workspace.yaml`, `turbo.json`, `tsconfig.json`, `pnpm-lock.yaml` — root monorepo bootstrap and toolchain wiring
+- `apps/*`, `packages/*` — initial workspace manifests and placeholder TypeScript entry points
+- `scripts/dev-stub.mjs`, `scripts/lint-workspace.mjs`, `scripts/workspace.test.mjs` — bootstrap dev and verification helpers
+- `.zenith-plan.json`, `.zenith-progress.md`, `PROGRESS.txt` — iteration tracking updates
+
+### Learnings for future iterations
+- The workspace namespace and package boundaries are now established, so later iterations can add shared config and real framework dependencies without reworking the repo shape
+- Root quality commands are now available and should be kept current in `.zenith-plan.json` as the scaffold becomes more specialized
+- A bounded `pnpm dev` smoke check is sufficient at bootstrap time to verify workspace orchestration before real app runtimes exist
+
+---

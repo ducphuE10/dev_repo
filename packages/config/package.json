@@ -1,0 +1,10 @@
+{
+  "name": "@dupe-hunt/config",
+  "version": "0.0.0",
+  "private": true,
+  "type": "module",
+  "exports": {
+    ".": "./src/index.ts",
+    "./typescript/base": "./typescript/base.json"
+  }
+}
