@@ -56,8 +56,8 @@
         "API tests can run in isolation with the chosen test framework."
       ],
       "priority": 4,
-      "status": "pending",
-      "completed_in_iteration": null
+      "status": "completed",
+      "completed_in_iteration": 5
     },
     {
       "id": "ST-5",
@@ -165,8 +165,8 @@
     }
   ],
   "discovered_issues": [
-    "The API, web, and mobile apps are still workspace stubs, so README runtime expectations beyond bootstrap remain aspirational until ST-4, ST-8, and ST-11 land.",
+    "The web and mobile apps are still workspace stubs, so README runtime expectations beyond the API remain aspirational until ST-8 and ST-11 land.",
     "The root lint command is still a custom workspace invariant check rather than a full code-style linter such as ESLint or Biome.",
-    "The database migration workflow is now local-first and file-backed, but it has not yet been exercised through the Fastify app because the API service is still scaffold-only."
+    "The API scaffold currently uses a lightweight app-local Redis adapter for dependency wiring; BullMQ-backed queue workers still belong to the later post and background-job iterations."
   ]
 }

@@ -1,7 +1,7 @@
 import { drizzle, type PostgresJsDatabase } from "drizzle-orm/postgres-js";
 import postgres, { type Options, type Sql } from "postgres";
 
-import { schema } from "./schema.js";
+import { schema } from "./schema.ts";
 
 export type DupeHuntDatabase = PostgresJsDatabase<typeof schema>;
 

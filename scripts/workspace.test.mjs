@@ -54,6 +54,23 @@ test("app environment examples exist for api, web, and mobile", async () => {
   }
 });
 
+test("api workspace exposes a runnable Fastify scaffold", async () => {
+  const manifest = JSON.parse(await readFile(path.join(rootDir, "apps/api/package.json"), "utf8"));
+  const appSource = await readFile(path.join(rootDir, "apps/api/src/app.ts"), "utf8");
+  const serverSource = await readFile(path.join(rootDir, "apps/api/src/server.ts"), "utf8");
+  const testSource = await readFile(path.join(rootDir, "apps/api/src/app.test.ts"), "utf8");
+
+  assert.equal(manifest.scripts.dev, "node --watch ./src/server.ts");
+  assert.equal(manifest.scripts.start, "node ./src/server.ts");
+  assert.equal(manifest.scripts.test, "node --test ./src/*.test.ts");
+  assert.equal(manifest.dependencies.fastify, "^5.6.1");
+  assert.match(appSource, /app\.get\("\/health"/);
+  assert.match(appSource, /app\.decorate\("database"/);
+  assert.match(appSource, /app\.decorate\("redis"/);
+  assert.match(serverSource, /await app\.listen/);
+  assert.match(testSource, /buildApiServer/);
+});
+
 test("database workspace exposes drizzle schema and migration workflow", async () => {
   const manifest = JSON.parse(await readFile(path.join(rootDir, "packages/db/package.json"), "utf8"));
   const schemaSource = await readFile(path.join(rootDir, "packages/db/src/schema.ts"), "utf8");

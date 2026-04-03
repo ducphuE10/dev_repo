@@ -135,9 +135,10 @@ See [`docs/plan.md`](docs/plan.md) for the full phased build plan.
 
 ## Current Status
 
-- Workspace bootstrap, shared config, and the initial database package are implemented.
+- Workspace bootstrap, shared config, the initial database package, and the Fastify API scaffold are implemented.
 - `packages/db` now owns the Drizzle schema, sequential SQL migrations, and the root `pnpm db:migrate` workflow.
-- `apps/api`, `apps/web`, and `apps/mobile` are still scaffolds, so the framework-specific runtime commands documented above remain upcoming work.
+- `apps/api` now provides a real Fastify server, shared config loading, dependency decoration, and an isolated `app.inject()` test harness.
+- `apps/web` and `apps/mobile` are still scaffolds, so their framework-specific runtime commands remain upcoming work.
 
 ---
 

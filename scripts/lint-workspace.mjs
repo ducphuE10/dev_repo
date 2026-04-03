@@ -33,6 +33,17 @@ for (const relativePath of envExamplePaths) {
   await readFile(path.join(rootDir, relativePath), "utf8");
 }
 
+const requiredApiArtifacts = [
+  "apps/api/src/app.ts",
+  "apps/api/src/config.ts",
+  "apps/api/src/server.ts",
+  "apps/api/src/app.test.ts"
+];
+
+for (const relativePath of requiredApiArtifacts) {
+  await readFile(path.join(rootDir, relativePath), "utf8");
+}
+
 const requiredDatabaseArtifacts = [
   "docker-compose.yml",
   "packages/db/scripts/migrate.mjs",
@@ -54,5 +65,5 @@ for (const relativePath of requiredDatabaseArtifacts) {
 }
 
 console.log(
-  `Workspace lint passed for ${expectedWorkspaces.length} packages, ${envExamplePaths.length} env examples, and ${requiredDatabaseArtifacts.length} database artifacts.`
+  `Workspace lint passed for ${expectedWorkspaces.length} packages, ${envExamplePaths.length} env examples, ${requiredApiArtifacts.length} API artifacts, and ${requiredDatabaseArtifacts.length} database artifacts.`
 );

@@ -3,5 +3,5 @@ export const dbWorkspace = {
   purpose: "schema and migration workspace"
 } as const;
 
-export * from "./client.js";
-export * from "./schema.js";
+export * from "./client.ts";
+export * from "./schema.ts";
