@@ -53,7 +53,7 @@ dupe-hunt/
 │   ├── technical.md   # API, DB schema, screen map
 │   └── plan.md        # Implementation plan (10 phases)
 ├── DEV_RULES.md       # Contribution rules for humans + agents
-├── PROGRESS.txt       # Running log of implementation progress
+├── .zenith-progress.md # Running log of implementation progress
 └── README.md
 ```
 
@@ -110,7 +110,7 @@ pnpm dev --filter=mobile    # Expo dev server
 | [`docs/technical.md`](docs/technical.md) | Technical spec — DB schema, API endpoints, screen map, flows |
 | [`docs/plan.md`](docs/plan.md) | Implementation plan — 10 phases, task checklists, timeline |
 | [`DEV_RULES.md`](DEV_RULES.md) | Contribution rules for developers and AI coding agents |
-| [`PROGRESS.txt`](PROGRESS.txt) | Running log of what has been built and key learnings |
+| [`.zenith-progress.md`](.zenith-progress.md) | Running log of what has been built and key learnings |
 
 ---
 
