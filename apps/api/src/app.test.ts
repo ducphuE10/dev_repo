@@ -4,12 +4,15 @@ import test from "node:test";
 import type { DatabaseClient } from "@dupe-hunt/db";
 
 import { signAccessToken, type AuthProvider, type AuthSession } from "./auth.ts";
-import { ApiError, buildApiServer, type RedisClient } from "./app.ts";
+import { ApiError, buildApiServer, type BackgroundJobQueue, type RedisClient } from "./app.ts";
 import { loadApiConfig, type ApiConfig } from "./config.ts";
 import {
   type ApiRepository,
   type CategoryRecord,
+  type CreatePostInput,
   type CreateUserInput,
+  type FeedTab,
+  type PostRecord,
   type UpdateUserProfileInput,
   type UserRecord
 } from "./repository.ts";
@@ -74,6 +77,68 @@ const createCategoryRecord = (overrides: Partial<CategoryRecord> = {}): Category
   ...overrides
 });
 
+const createPostRecord = (overrides: Partial<PostRecord> = {}): PostRecord => {
+  const user = overrides.user ?? createUserRecord();
+  const category = overrides.category ?? createCategoryRecord();
+  const originalPrice = overrides.originalPrice ?? 49;
+  const dupePrice = overrides.dupePrice ?? 14;
+
+  return {
+    id: overrides.id ?? "44444444-4444-4444-8444-000000000001",
+    userId: overrides.userId ?? user.id,
+    categoryId: overrides.categoryId ?? category.id,
+    originalProductName: overrides.originalProductName ?? "Charlotte Tilbury Flawless Filter",
+    originalBrand: overrides.originalBrand ?? "Charlotte Tilbury",
+    originalPrice,
+    originalCurrency: overrides.originalCurrency ?? "USD",
+    dupeProductName: overrides.dupeProductName ?? "e.l.f. Halo Glow Liquid Filter",
+    dupeBrand: overrides.dupeBrand ?? "e.l.f.",
+    dupePrice,
+    dupeCurrency: overrides.dupeCurrency ?? "USD",
+    priceSaved: overrides.priceSaved ?? Number((originalPrice - dupePrice).toFixed(2)),
+    mediaType: overrides.mediaType ?? "photo",
+    mediaUrls: overrides.mediaUrls ?? ["https://dupe-hunt-media.r2.dev/posts/sample.jpg"],
+    reviewText: overrides.reviewText ?? "Literally identical finish.",
+    affiliateLink: overrides.affiliateLink ?? null,
+    affiliatePlatform: overrides.affiliatePlatform ?? null,
+    upvoteCount: overrides.upvoteCount ?? 0,
+    downvoteCount: overrides.downvoteCount ?? 0,
+    flagCount: overrides.flagCount ?? 0,
+    isVerifiedBuy: overrides.isVerifiedBuy ?? false,
+    status: overrides.status ?? "active",
+    createdAt: overrides.createdAt ?? now,
+    updatedAt: overrides.updatedAt ?? now,
+    user,
+    category
+  };
+};
+
+const scoreForYouPost = (post: PostRecord) =>
+  post.upvoteCount + (post.isVerifiedBuy ? 10 : 0) + (Date.parse(post.createdAt) >= Date.parse(now) - 86_400_000 ? 5 : 0);
+
+const sortPosts = (posts: PostRecord[], tab: FeedTab) =>
+  [...posts].sort((left, right) => {
+    if (tab === "for_you") {
+      const scoreDelta = scoreForYouPost(right) - scoreForYouPost(left);
+
+      if (scoreDelta !== 0) {
+        return scoreDelta;
+      }
+    }
+
+    if (tab === "trending" && left.upvoteCount !== right.upvoteCount) {
+      return right.upvoteCount - left.upvoteCount;
+    }
+
+    const createdAtDelta = Date.parse(right.createdAt) - Date.parse(left.createdAt);
+
+    if (createdAtDelta !== 0) {
+      return createdAtDelta;
+    }
+
+    return right.id.localeCompare(left.id);
+  });
+
 const createRepositoryDouble = () => {
   const users = new Map<string, UserRecord>();
   const categories = [
@@ -95,6 +160,8 @@ const createRepositoryDouble = () => {
     })
   ];
   const userCategorySelections = new Map<string, number[]>();
+  const posts = new Map<string, PostRecord>();
+  let postCounter = 2;
 
   const repository: ApiRepository = {
     findUserByEmail: async (email) =>
@@ -151,13 +218,136 @@ const createRepositoryDouble = () => {
     replaceUserCategories: async (userId, categoryIds) => {
       userCategorySelections.set(userId, [...categoryIds]);
       return repository.listUserCategories(userId);
+    },
+    createPost: async (input: CreatePostInput) => {
+      const user = users.get(input.userId);
+      const category = categories.find((entry) => entry.id === input.categoryId);
+
+      assert.ok(user, "expected createPost user to exist");
+      assert.ok(category, "expected createPost category to exist");
+
+      const id = `44444444-4444-4444-8444-${String(postCounter).padStart(12, "0")}`;
+      postCounter += 1;
+
+      const post = createPostRecord({
+        id,
+        userId: input.userId,
+        categoryId: input.categoryId,
+        originalProductName: input.originalProductName,
+        originalBrand: input.originalBrand ?? null,
+        originalPrice: input.originalPrice,
+        originalCurrency: input.originalCurrency,
+        dupeProductName: input.dupeProductName,
+        dupeBrand: input.dupeBrand ?? null,
+        dupePrice: input.dupePrice,
+        dupeCurrency: input.dupeCurrency,
+        mediaType: input.mediaType,
+        mediaUrls: input.mediaUrls,
+        reviewText: input.reviewText ?? null,
+        affiliateLink: input.affiliateLink ?? null,
+        affiliatePlatform: input.affiliatePlatform ?? null,
+        createdAt: now,
+        updatedAt: now,
+        user,
+        category
+      });
+
+      posts.set(post.id, post);
+      users.set(user.id, {
+        ...user,
+        postsPerDayCount: user.postsPerDayCount + 1,
+        lastPostDate: "2026-04-03",
+        lastActiveAt: now
+      });
+      category.postCount += 1;
+
+      return post;
+    },
+    findPostById: async (postId, options = {}) => {
+      const post = posts.get(postId) ?? null;
+
+      if (!post) {
+        return null;
+      }
+
+      if (!options.includeInactive && (post.status !== "active" || !post.category.isActive)) {
+        return null;
+      }
+
+      return post;
+    },
+    listPosts: async (input) => {
+      const categoryIds = input.categoryIds ? new Set(input.categoryIds) : null;
+      const filtered = Array.from(posts.values()).filter((post) => {
+        if (post.status !== "active" || !post.category.isActive) {
+          return false;
+        }
+
+        if (input.tab === "trending" && Date.parse(post.createdAt) < Date.parse(now) - 86_400_000) {
+          return false;
+        }
+
+        if (input.verifiedOnly && !post.isVerifiedBuy) {
+          return false;
+        }
+
+        if (categoryIds && !categoryIds.has(post.categoryId)) {
+          return false;
+        }
+
+        return true;
+      });
+      const sorted = sortPosts(filtered, input.tab);
+
+      if (!input.cursor) {
+        return sorted.slice(0, input.limit);
+      }
+
+      const cursorIndex = sorted.findIndex((post) => post.id === input.cursor);
+
+      return cursorIndex === -1 ? [] : sorted.slice(cursorIndex + 1, cursorIndex + 1 + input.limit);
+    },
+    softDeletePost: async (postId) => {
+      const existing = posts.get(postId);
+
+      if (!existing || existing.status === "removed") {
+        return;
+      }
+
+      posts.set(postId, {
+        ...existing,
+        status: "removed",
+        updatedAt: now
+      });
+      existing.category.postCount = Math.max(existing.category.postCount - 1, 0);
     }
   };
 
   return {
     repository,
     users,
+    categories,
+    posts,
     userCategorySelections
+  };
+};
+
+const createJobQueueDouble = () => {
+  const jobs: Array<{ name: string; payload: Record<string, unknown> }> = [];
+
+  const queue: BackgroundJobQueue = {
+    enqueue: async (name, payload) => {
+      jobs.push({
+        name,
+        payload
+      });
+    },
+    close: async () => undefined
+  };
+
+  return {
+    jobs,
+    queue
   };
 };
 
@@ -257,19 +447,24 @@ const createAuthProviderDouble = (config: ApiConfig) => {
 
 const createTestServer = () => {
   const config = createTestConfig();
-  const { repository, users, userCategorySelections } = createRepositoryDouble();
+  const { repository, users, categories, posts, userCategorySelections } = createRepositoryDouble();
   const { authProvider, createSession } = createAuthProviderDouble(config);
+  const { jobs, queue } = createJobQueueDouble();
   const app = buildApiServer({
     config,
     database: createDatabaseDouble(),
     redis: createRedisDouble(),
     repository,
-    authProvider
+    authProvider,
+    jobs: queue
   });
 
   return {
     app,
+    categories,
     config,
+    jobs,
+    posts,
     users,
     userCategorySelections,
     createSession
@@ -614,6 +809,291 @@ test("user category preferences can be listed and replaced", async (context) => 
       }
     ]
   });
+});
+
+test("POST /upload/media signs a media upload target for authenticated users", async (context) => {
+  const { app, users, createSession } = createTestServer();
+  const existingUser = createUserRecord();
+  users.set(existingUser.id, existingUser);
+  const session = createSession(existingUser.id, existingUser.email, "password", "upload-refresh");
+
+  context.after(async () => {
+    await app.close();
+  });
+
+  const response = await app.inject({
+    method: "POST",
+    url: "/upload/media",
+    headers: {
+      authorization: `Bearer ${session.accessToken}`
+    },
+    payload: {
+      media_type: "photo",
+      content_type: "image/jpeg",
+      file_name: "halo-glow.jpg"
+    }
+  });
+
+  assert.equal(response.statusCode, 200);
+  const payload = response.json();
+
+  assert.equal(payload.expires_in, 300);
+  assert.match(payload.upload_url, /^https:\/\/account-id\.r2\.cloudflarestorage\.com\/dupe-hunt-media\/posts\//);
+  assert.match(payload.upload_url, /signature=/);
+  assert.match(payload.media_url, /^https:\/\/dupe-hunt-media\.r2\.dev\/posts\/.*\.jpg$/);
+});
+
+test("POST /posts creates a post and enqueues video and affiliate jobs when needed", async (context) => {
+  const { app, categories, jobs, users, createSession } = createTestServer();
+  const existingUser = createUserRecord();
+  users.set(existingUser.id, existingUser);
+  const session = createSession(existingUser.id, existingUser.email, "password", "post-refresh");
+
+  context.after(async () => {
+    await app.close();
+  });
+
+  const response = await app.inject({
+    method: "POST",
+    url: "/posts",
+    headers: {
+      authorization: `Bearer ${session.accessToken}`
+    },
+    payload: {
+      category_id: categories[0]?.id,
+      original_product_name: "Dyson Airwrap",
+      original_brand: "Dyson",
+      original_price: 599,
+      dupe_product_name: "Shark FlexStyle",
+      dupe_brand: "Shark",
+      dupe_price: 279,
+      media_type: "video",
+      media_urls: ["https://dupe-hunt-media.r2.dev/posts/video.mp4"],
+      review_text: "Same bounce, way lower price.",
+      affiliate_link: "https://www.amazon.com/example-dupe"
+    }
+  });
+
+  assert.equal(response.statusCode, 201);
+  assert.equal(response.json().post.price_saved, 320);
+  assert.equal(response.json().post.media_type, "video");
+  assert.deepEqual(
+    jobs.map((job) => job.name),
+    ["process-video", "wrap-affiliate-link"]
+  );
+  assert.equal(jobs[1]?.payload.affiliatePlatform, "amazon");
+});
+
+test("GET /posts applies for-you ranking, category preferences, and cursor pagination", async (context) => {
+  const { app, categories, posts, users, userCategorySelections, createSession } = createTestServer();
+  const existingUser = createUserRecord();
+  users.set(existingUser.id, existingUser);
+  userCategorySelections.set(existingUser.id, [1]);
+  const session = createSession(existingUser.id, existingUser.email, "password", "feed-refresh");
+  const beautyCategory = categories[0]!;
+  const techCategory = categories[1]!;
+  const topBeautyPost = createPostRecord({
+    id: "44444444-4444-4444-8444-000000000101",
+    category: beautyCategory,
+    categoryId: beautyCategory.id,
+    user: existingUser,
+    userId: existingUser.id,
+    upvoteCount: 1,
+    isVerifiedBuy: true,
+    createdAt: now
+  });
+  const secondBeautyPost = createPostRecord({
+    id: "44444444-4444-4444-8444-000000000102",
+    category: beautyCategory,
+    categoryId: beautyCategory.id,
+    user: existingUser,
+    userId: existingUser.id,
+    upvoteCount: 9,
+    isVerifiedBuy: false,
+    createdAt: "2026-04-03T11:00:00.000Z"
+  });
+  const filteredOutTechPost = createPostRecord({
+    id: "44444444-4444-4444-8444-000000000103",
+    category: techCategory,
+    categoryId: techCategory.id,
+    user: existingUser,
+    userId: existingUser.id,
+    upvoteCount: 20,
+    isVerifiedBuy: true,
+    createdAt: now
+  });
+  posts.set(topBeautyPost.id, topBeautyPost);
+  posts.set(secondBeautyPost.id, secondBeautyPost);
+  posts.set(filteredOutTechPost.id, filteredOutTechPost);
+
+  context.after(async () => {
+    await app.close();
+  });
+
+  const firstPage = await app.inject({
+    method: "GET",
+    url: "/posts?limit=1",
+    headers: {
+      authorization: `Bearer ${session.accessToken}`
+    }
+  });
+
+  assert.equal(firstPage.statusCode, 200);
+  assert.equal(firstPage.json().posts[0]?.id, topBeautyPost.id);
+  assert.equal(firstPage.json().next_cursor, topBeautyPost.id);
+
+  const secondPage = await app.inject({
+    method: "GET",
+    url: `/posts?limit=1&cursor=${topBeautyPost.id}`,
+    headers: {
+      authorization: `Bearer ${session.accessToken}`
+    }
+  });
+
+  assert.equal(secondPage.statusCode, 200);
+  assert.equal(secondPage.json().posts[0]?.id, secondBeautyPost.id);
+  assert.equal(secondPage.json().next_cursor, null);
+
+  const badCursorResponse = await app.inject({
+    method: "GET",
+    url: "/posts?cursor=44444444-4444-4444-8444-999999999999"
+  });
+
+  assert.equal(badCursorResponse.statusCode, 400);
+});
+
+test("GET /posts supports anonymous trending queries with verified and category filters", async (context) => {
+  const { app, categories, posts, users } = createTestServer();
+  const author = createUserRecord();
+  users.set(author.id, author);
+  posts.set(
+    "44444444-4444-4444-8444-000000000301",
+    createPostRecord({
+      id: "44444444-4444-4444-8444-000000000301",
+      user: author,
+      userId: author.id,
+      category: categories[0]!,
+      categoryId: categories[0]!.id,
+      upvoteCount: 7,
+      isVerifiedBuy: true,
+      createdAt: now
+    })
+  );
+  posts.set(
+    "44444444-4444-4444-8444-000000000302",
+    createPostRecord({
+      id: "44444444-4444-4444-8444-000000000302",
+      user: author,
+      userId: author.id,
+      category: categories[0]!,
+      categoryId: categories[0]!.id,
+      upvoteCount: 12,
+      isVerifiedBuy: false,
+      createdAt: now
+    })
+  );
+  posts.set(
+    "44444444-4444-4444-8444-000000000303",
+    createPostRecord({
+      id: "44444444-4444-4444-8444-000000000303",
+      user: author,
+      userId: author.id,
+      category: categories[1]!,
+      categoryId: categories[1]!.id,
+      upvoteCount: 50,
+      isVerifiedBuy: true,
+      createdAt: now
+    })
+  );
+  posts.set(
+    "44444444-4444-4444-8444-000000000304",
+    createPostRecord({
+      id: "44444444-4444-4444-8444-000000000304",
+      user: author,
+      userId: author.id,
+      category: categories[0]!,
+      categoryId: categories[0]!.id,
+      upvoteCount: 100,
+      isVerifiedBuy: true,
+      createdAt: "2026-04-01T12:00:00.000Z"
+    })
+  );
+
+  context.after(async () => {
+    await app.close();
+  });
+
+  const response = await app.inject({
+    method: "GET",
+    url: "/posts?tab=trending&verified=true&category=beauty"
+  });
+
+  assert.equal(response.statusCode, 200);
+  assert.deepEqual(
+    response.json().posts.map((post: { id: string }) => post.id),
+    ["44444444-4444-4444-8444-000000000301"]
+  );
+});
+
+test("GET /posts/:id returns active posts and DELETE /posts/:id is owner-only soft delete", async (context) => {
+  const { app, categories, posts, users, createSession } = createTestServer();
+  const owner = createUserRecord();
+  const otherUser = createUserRecord({
+    id: "33333333-3333-4333-8333-333333333333",
+    username: "other_user",
+    email: "other@example.com"
+  });
+  users.set(owner.id, owner);
+  users.set(otherUser.id, otherUser);
+  const post = createPostRecord({
+    id: "44444444-4444-4444-8444-000000000201",
+    user: owner,
+    userId: owner.id,
+    category: categories[0]!,
+    categoryId: categories[0]!.id
+  });
+  posts.set(post.id, post);
+  const ownerSession = createSession(owner.id, owner.email, "password", "owner-refresh");
+  const otherSession = createSession(otherUser.id, otherUser.email, "password", "other-refresh");
+
+  context.after(async () => {
+    await app.close();
+  });
+
+  const showResponse = await app.inject({
+    method: "GET",
+    url: `/posts/${post.id}`
+  });
+
+  assert.equal(showResponse.statusCode, 200);
+  assert.equal(showResponse.json().post.id, post.id);
+
+  const forbiddenDelete = await app.inject({
+    method: "DELETE",
+    url: `/posts/${post.id}`,
+    headers: {
+      authorization: `Bearer ${otherSession.accessToken}`
+    }
+  });
+
+  assert.equal(forbiddenDelete.statusCode, 403);
+
+  const deleteResponse = await app.inject({
+    method: "DELETE",
+    url: `/posts/${post.id}`,
+    headers: {
+      authorization: `Bearer ${ownerSession.accessToken}`
+    }
+  });
+
+  assert.equal(deleteResponse.statusCode, 204);
+
+  const notFoundResponse = await app.inject({
+    method: "GET",
+    url: `/posts/${post.id}`
+  });
+
+  assert.equal(notFoundResponse.statusCode, 404);
 });
 
 test("unknown routes use the shared error payload shape", async (context) => {

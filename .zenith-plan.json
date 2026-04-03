@@ -82,8 +82,8 @@
         "Integration tests cover post creation, deletion, and feed retrieval."
       ],
       "priority": 6,
-      "status": "pending",
-      "completed_in_iteration": null
+      "status": "completed",
+      "completed_in_iteration": 7
     },
     {
       "id": "ST-7",
@@ -167,6 +167,6 @@
   "discovered_issues": [
     "The web and mobile apps are still workspace stubs, so README runtime expectations beyond the API remain aspirational until ST-8 and ST-11 land.",
     "The root lint command is still a custom workspace invariant check rather than a full code-style linter such as ESLint or Biome.",
-    "The API scaffold currently uses a lightweight app-local Redis adapter for dependency wiring; BullMQ-backed queue workers still belong to the later post and background-job iterations."
+    "The API now enqueues background work through an app-local job queue seam for post creation, but real BullMQ-backed worker execution is still deferred until the later worker-heavy iterations flesh out processing and caching infrastructure."
   ]
 }

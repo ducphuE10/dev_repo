@@ -1,4 +1,4 @@
-import { randomInt } from "node:crypto";
+import { createHmac, randomInt, randomUUID } from "node:crypto";
 
 import fastify, { type FastifyInstance, type FastifyReply, type FastifyRequest } from "fastify";
 
@@ -17,6 +17,10 @@ import {
   createDatabaseRepository,
   type ApiRepository,
   type CategoryRecord,
+  type CreatePostInput,
+  type FeedTab,
+  type PostMediaType,
+  type PostRecord,
   type UpdateUserProfileInput,
   type UserRecord
 } from "./repository.ts";
@@ -27,12 +31,20 @@ export interface RedisClient {
   close: () => Promise<void>;
 }
 
+export type BackgroundJobName = "process-video" | "wrap-affiliate-link";
+
+export interface BackgroundJobQueue {
+  enqueue: (jobName: BackgroundJobName, payload: Record<string, unknown>) => Promise<void>;
+  close: () => Promise<void>;
+}
+
 export interface BuildApiServerOptions {
   config?: ApiConfig;
   database?: DatabaseClient;
   redis?: RedisClient;
   repository?: ApiRepository;
   authProvider?: AuthProvider;
+  jobs?: BackgroundJobQueue;
   logger?: boolean;
 }
 
@@ -54,6 +66,11 @@ export const createRedisClient = (url: string): RedisClient => ({
   close: async () => undefined
 });
 
+export const createBackgroundJobQueue = (): BackgroundJobQueue => ({
+  enqueue: async () => undefined,
+  close: async () => undefined
+});
+
 declare module "fastify" {
   interface FastifyInstance {
     config: ApiConfig;
@@ -61,6 +78,7 @@ declare module "fastify" {
     redis: RedisClient;
     repository: ApiRepository;
     authProvider: AuthProvider;
+    jobs: BackgroundJobQueue;
   }
 }
 
@@ -110,6 +128,10 @@ const emailPattern = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
 const usernamePattern = /^[a-z0-9_]{3,30}$/i;
 const uuidPattern =
   /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
+const currencyPattern = /^[A-Z]{3}$/;
+const feedTabs = new Set<FeedTab>(["for_you", "trending", "new"]);
+const mediaTypes = new Set<PostMediaType>(["photo", "video"]);
+const oneDayInMilliseconds = 24 * 60 * 60 * 1000;
 
 const requireObject = (value: unknown, message = "Request body must be an object.") => {
   if (!value || typeof value !== "object" || Array.isArray(value)) {
@@ -128,7 +150,7 @@ const requireString = (value: unknown, fieldName: string) => {
 };
 
 const readOptionalString = (value: unknown, fieldName: string, maxLength: number) => {
-  if (value === undefined) {
+  if (value === undefined || value === null) {
     return undefined;
   }
 
@@ -147,6 +169,14 @@ const readOptionalString = (value: unknown, fieldName: string, maxLength: number
   }
 
   return normalized;
+};
+
+const normalizeUuid = (value: string, fieldName: string) => {
+  if (!uuidPattern.test(value)) {
+    throw new ApiError(400, "VALIDATION_ERROR", `${fieldName} must be a valid UUID.`);
+  }
+
+  return value;
 };
 
 const normalizeEmail = (value: unknown) => {
@@ -183,13 +213,9 @@ const normalizePassword = (value: unknown) => {
   return password;
 };
 
-const normalizeUserId = (value: string) => {
-  if (!uuidPattern.test(value)) {
-    throw new ApiError(400, "VALIDATION_ERROR", "user id must be a valid UUID.");
-  }
+const normalizeUserId = (value: string) => normalizeUuid(value, "user id");
 
-  return value;
-};
+const normalizePostId = (value: string) => normalizeUuid(value, "post id");
 
 const readCategoryIds = (value: unknown) => {
   if (!Array.isArray(value) || value.length === 0) {
@@ -206,6 +232,230 @@ const readCategoryIds = (value: unknown) => {
 
   return Array.from(new Set(categoryIds));
 };
+
+const readOptionalUrl = (value: unknown, fieldName: string) => {
+  const url = readOptionalString(value, fieldName, 2048);
+
+  if (!url) {
+    return undefined;
+  }
+
+  try {
+    return new URL(url).toString();
+  } catch {
+    throw new ApiError(400, "VALIDATION_ERROR", `${fieldName} must be a valid absolute URL.`);
+  }
+};
+
+const readRequiredUrl = (value: unknown, fieldName: string) => {
+  const url = requireString(value, fieldName);
+
+  try {
+    return new URL(url).toString();
+  } catch {
+    throw new ApiError(400, "VALIDATION_ERROR", `${fieldName} must be a valid absolute URL.`);
+  }
+};
+
+const readRequiredPrice = (value: unknown, fieldName: string) => {
+  const numericValue =
+    typeof value === "number" ? value : typeof value === "string" && value.trim().length > 0 ? Number(value) : NaN;
+
+  if (!Number.isFinite(numericValue) || numericValue <= 0) {
+    throw new ApiError(400, "VALIDATION_ERROR", `${fieldName} must be a positive number.`);
+  }
+
+  return Number(numericValue.toFixed(2));
+};
+
+const readCurrency = (value: unknown, fieldName: string) => {
+  if (value === undefined || value === null) {
+    return "USD";
+  }
+
+  const currency = requireString(value, fieldName).toUpperCase();
+
+  if (!currencyPattern.test(currency)) {
+    throw new ApiError(400, "VALIDATION_ERROR", `${fieldName} must be a 3-letter currency code.`);
+  }
+
+  return currency;
+};
+
+const normalizeMediaType = (value: unknown): PostMediaType => {
+  const mediaType = requireString(value, "media_type").toLowerCase();
+
+  if (!mediaTypes.has(mediaType as PostMediaType)) {
+    throw new ApiError(400, "VALIDATION_ERROR", "media_type must be either photo or video.");
+  }
+
+  return mediaType as PostMediaType;
+};
+
+const readMediaUrls = (value: unknown, mediaType: PostMediaType) => {
+  if (!Array.isArray(value) || value.length === 0) {
+    throw new ApiError(400, "VALIDATION_ERROR", "media_urls must be a non-empty array of URLs.");
+  }
+
+  if (mediaType === "video" && value.length !== 1) {
+    throw new ApiError(400, "VALIDATION_ERROR", "video posts must include exactly one media URL.");
+  }
+
+  if (mediaType === "photo" && value.length > 5) {
+    throw new ApiError(400, "VALIDATION_ERROR", "photo posts can include at most five media URLs.");
+  }
+
+  return value.map((entry, index) => readRequiredUrl(entry, `media_urls[${index}]`));
+};
+
+const readOptionalBooleanQuery = (value: unknown, fieldName: string) => {
+  if (value === undefined) {
+    return false;
+  }
+
+  if (value === true || value === "true") {
+    return true;
+  }
+
+  if (value === false || value === "false") {
+    return false;
+  }
+
+  throw new ApiError(400, "VALIDATION_ERROR", `${fieldName} must be true or false.`);
+};
+
+const readPositiveInteger = (value: unknown, fieldName: string) => {
+  const numericValue =
+    typeof value === "number"
+      ? value
+      : typeof value === "string" && value.trim().length > 0
+        ? Number.parseInt(value, 10)
+        : Number.NaN;
+
+  if (!Number.isInteger(numericValue) || numericValue < 1) {
+    throw new ApiError(400, "VALIDATION_ERROR", `${fieldName} must be a positive integer.`);
+  }
+
+  return numericValue;
+};
+
+const readFeedLimit = (value: unknown) => {
+  if (value === undefined) {
+    return 20;
+  }
+
+  const limit = readPositiveInteger(value, "limit");
+
+  if (limit > 50) {
+    throw new ApiError(400, "VALIDATION_ERROR", "limit cannot be greater than 50.");
+  }
+
+  return limit;
+};
+
+const readFeedTab = (value: unknown): FeedTab => {
+  if (value === undefined) {
+    return "for_you";
+  }
+
+  const tab = requireString(value, "tab").toLowerCase();
+
+  if (!feedTabs.has(tab as FeedTab)) {
+    throw new ApiError(400, "VALIDATION_ERROR", "tab must be one of for_you, trending, or new.");
+  }
+
+  return tab as FeedTab;
+};
+
+const readOptionalCategorySlug = (value: unknown) => {
+  const category = readOptionalString(value, "category", 50);
+
+  return category?.toLowerCase();
+};
+
+const readReviewText = (value: unknown) => readOptionalString(value, "review_text", 280);
+
+const readUploadContentType = (value: unknown, mediaType: PostMediaType) => {
+  const contentType = requireString(value, "content_type").toLowerCase();
+  const isValid = mediaType === "photo" ? contentType.startsWith("image/") : contentType.startsWith("video/");
+
+  if (!isValid) {
+    throw new ApiError(400, "VALIDATION_ERROR", `content_type must match media_type ${mediaType}.`);
+  }
+
+  return contentType;
+};
+
+const inferFileExtension = (fileName: string | undefined, contentType: string) => {
+  const normalizedFileName = fileName?.trim().toLowerCase();
+  const fileExtension = normalizedFileName?.includes(".") ? normalizedFileName.split(".").pop() : undefined;
+
+  if (fileExtension && /^[a-z0-9]+$/.test(fileExtension)) {
+    return fileExtension;
+  }
+
+  const subtype = contentType.split("/")[1] ?? "bin";
+
+  return subtype.replace(/[^a-z0-9]+/g, "") || "bin";
+};
+
+const inferAffiliatePlatform = (url: string | undefined) => {
+  if (!url) {
+    return undefined;
+  }
+
+  const hostname = new URL(url).hostname.toLowerCase();
+
+  if (hostname.includes("amazon.")) {
+    return "amazon";
+  }
+
+  if (hostname.includes("walmart.")) {
+    return "walmart";
+  }
+
+  if (hostname.includes("target.")) {
+    return "target";
+  }
+
+  if (hostname.includes("tiktok.")) {
+    return "tiktok_shop";
+  }
+
+  if (hostname.includes("etsy.")) {
+    return "etsy";
+  }
+
+  return "other";
+};
+
+const createUploadSignature = (key: string, contentType: string, expiresAt: number, secret: string) =>
+  createHmac("sha256", secret).update(`${key}:${contentType}:${expiresAt}`).digest("hex");
+
+const createMediaStorageKey = (userId: string, mediaType: PostMediaType, fileName: string | undefined, contentType: string) =>
+  `posts/${userId}/${mediaType}/${randomUUID()}.${inferFileExtension(fileName, contentType)}`;
+
+const createMediaUploadUrl = (
+  config: ApiConfig,
+  key: string,
+  contentType: string,
+  expiresAt: number
+) => {
+  const uploadUrl = new URL(
+    `https://${config.cloudflareR2AccountId}.r2.cloudflarestorage.com/${config.cloudflareR2Bucket}/${key}`
+  );
+
+  uploadUrl.searchParams.set(
+    "signature",
+    createUploadSignature(key, contentType, expiresAt, config.cloudflareR2SecretKey)
+  );
+  uploadUrl.searchParams.set("expires", String(expiresAt));
+  uploadUrl.searchParams.set("content_type", contentType);
+
+  return uploadUrl.toString();
+};
+
+const createPublicMediaUrl = (config: ApiConfig, key: string) => `https://${config.cloudflareR2Bucket}.r2.dev/${key}`;
 
 const toPublicUser = (user: UserRecord) => ({
   id: user.id,
@@ -233,6 +483,39 @@ const toCategory = (category: CategoryRecord) => ({
   icon: category.icon,
   post_count: category.postCount,
   sort_order: category.sortOrder
+});
+
+const toPost = (post: PostRecord) => ({
+  id: post.id,
+  original_product_name: post.originalProductName,
+  original_brand: post.originalBrand,
+  original_price: post.originalPrice,
+  original_currency: post.originalCurrency,
+  dupe_product_name: post.dupeProductName,
+  dupe_brand: post.dupeBrand,
+  dupe_price: post.dupePrice,
+  dupe_currency: post.dupeCurrency,
+  price_saved: post.priceSaved,
+  media_type: post.mediaType,
+  media_urls: post.mediaUrls,
+  review_text: post.reviewText,
+  affiliate_link: post.affiliateLink,
+  affiliate_platform: post.affiliatePlatform,
+  upvote_count: post.upvoteCount,
+  downvote_count: post.downvoteCount,
+  flag_count: post.flagCount,
+  is_verified_buy: post.isVerifiedBuy,
+  status: post.status,
+  created_at: post.createdAt,
+  updated_at: post.updatedAt,
+  user: {
+    id: post.user.id,
+    username: post.user.username,
+    avatar_url: post.user.avatarUrl,
+    verified_buy_count: post.user.verifiedBuyCount,
+    contributor_tier: post.user.contributorTier
+  },
+  category: toCategory(post.category)
 });
 
 const toAuthResponse = (user: UserRecord, session: AuthSession) => ({
@@ -315,6 +598,46 @@ const requireAuthenticatedUser = async (request: FastifyRequest, app: FastifyIns
     accessToken,
     user
   };
+};
+
+const readOptionalAuthenticatedUser = async (request: FastifyRequest, app: FastifyInstance) => {
+  if (!request.headers.authorization) {
+    return null;
+  }
+
+  return requireAuthenticatedUser(request, app);
+};
+
+const resolveCategoryFilterIds = async (
+  app: FastifyInstance,
+  tab: FeedTab,
+  categorySlug: string | undefined,
+  userId: string | undefined
+) => {
+  const activeCategories = await app.repository.listActiveCategories();
+  const requestedCategory = categorySlug
+    ? activeCategories.find((category) => category.slug === categorySlug)
+    : undefined;
+
+  if (categorySlug && !requestedCategory) {
+    throw new ApiError(400, "INVALID_CATEGORY_FILTER", "category must reference an active category slug.");
+  }
+
+  if (tab !== "for_you" || !userId) {
+    return requestedCategory ? [requestedCategory.id] : undefined;
+  }
+
+  const preferredCategoryIds = (await app.repository.listUserCategories(userId)).map((category) => category.id);
+
+  if (preferredCategoryIds.length === 0) {
+    return requestedCategory ? [requestedCategory.id] : undefined;
+  }
+
+  if (!requestedCategory) {
+    return preferredCategoryIds;
+  }
+
+  return preferredCategoryIds.includes(requestedCategory.id) ? [requestedCategory.id] : [];
 };
 
 const registerHealthRoute = (app: FastifyInstance) => {
@@ -522,23 +845,174 @@ const registerCategoryRoutes = (app: FastifyInstance) => {
   });
 };
 
+const registerUploadRoutes = (app: FastifyInstance) => {
+  app.post("/upload/media", async (request) => {
+    const { user } = await requireAuthenticatedUser(request, app);
+    const body = requireObject(request.body);
+    const mediaType = normalizeMediaType(body.media_type);
+    const contentType = readUploadContentType(body.content_type, mediaType);
+    const fileName = readOptionalString(body.file_name, "file_name", 255);
+    const key = createMediaStorageKey(user.id, mediaType, fileName, contentType);
+    const expiresIn = 300;
+    const expiresAt = Math.floor(Date.now() / 1000) + expiresIn;
+
+    return {
+      upload_url: createMediaUploadUrl(app.config, key, contentType, expiresAt),
+      media_url: createPublicMediaUrl(app.config, key),
+      expires_in: expiresIn
+    };
+  });
+};
+
+const registerPostRoutes = (app: FastifyInstance) => {
+  app.post("/posts", async (request, reply) => {
+    const { user } = await requireAuthenticatedUser(request, app);
+    const body = requireObject(request.body);
+    const categoryId = readPositiveInteger(body.category_id, "category_id");
+    const activeCategories = await app.repository.listActiveCategories();
+
+    if (!activeCategories.some((category) => category.id === categoryId)) {
+      throw new ApiError(400, "INVALID_CATEGORY_SELECTION", "category_id must reference an active category.");
+    }
+
+    const mediaType = normalizeMediaType(body.media_type);
+    const affiliateLink = readOptionalUrl(body.affiliate_link, "affiliate_link");
+    const input: CreatePostInput = {
+      userId: user.id,
+      categoryId,
+      originalProductName: requireString(body.original_product_name, "original_product_name"),
+      originalBrand: readOptionalString(body.original_brand, "original_brand", 100),
+      originalPrice: readRequiredPrice(body.original_price, "original_price"),
+      originalCurrency: readCurrency(body.original_currency, "original_currency"),
+      dupeProductName: requireString(body.dupe_product_name, "dupe_product_name"),
+      dupeBrand: readOptionalString(body.dupe_brand, "dupe_brand", 100),
+      dupePrice: readRequiredPrice(body.dupe_price, "dupe_price"),
+      dupeCurrency: readCurrency(body.dupe_currency, "dupe_currency"),
+      mediaType,
+      mediaUrls: readMediaUrls(body.media_urls, mediaType),
+      reviewText: readReviewText(body.review_text),
+      affiliateLink,
+      affiliatePlatform: inferAffiliatePlatform(affiliateLink)
+    };
+    const post = await app.repository.createPost(input);
+
+    if (post.mediaType === "video") {
+      await app.jobs.enqueue("process-video", {
+        postId: post.id,
+        userId: user.id,
+        mediaUrls: post.mediaUrls
+      });
+    }
+
+    if (post.affiliateLink) {
+      await app.jobs.enqueue("wrap-affiliate-link", {
+        postId: post.id,
+        affiliateLink: post.affiliateLink,
+        affiliatePlatform: post.affiliatePlatform
+      });
+    }
+
+    return reply.status(201).send({
+      post: toPost(post)
+    });
+  });
+
+  app.get("/posts", async (request) => {
+    const authenticated = await readOptionalAuthenticatedUser(request, app);
+    const query = requireObject(request.query, "Query params must be an object.");
+    const tab = readFeedTab(query.tab);
+    const categorySlug = readOptionalCategorySlug(query.category);
+    const verifiedOnly = readOptionalBooleanQuery(query.verified, "verified");
+    const limit = readFeedLimit(query.limit);
+    const cursor = query.cursor === undefined ? undefined : normalizePostId(requireString(query.cursor, "cursor"));
+
+    if (cursor) {
+      const cursorPost = await app.repository.findPostById(cursor);
+
+      if (!cursorPost) {
+        throw new ApiError(400, "INVALID_CURSOR", "cursor must reference an active post.");
+      }
+    }
+
+    const categoryIds = await resolveCategoryFilterIds(app, tab, categorySlug, authenticated?.user.id);
+
+    if (categoryIds && categoryIds.length === 0) {
+      return {
+        posts: [],
+        next_cursor: null
+      };
+    }
+
+    const posts = await app.repository.listPosts({
+      tab,
+      categoryIds,
+      verifiedOnly,
+      cursor,
+      limit: limit + 1
+    });
+    const page = posts.slice(0, limit);
+    const hasMore = posts.length > limit;
+
+    return {
+      posts: page.map(toPost),
+      next_cursor: hasMore ? page.at(-1)?.id ?? null : null
+    };
+  });
+
+  app.get("/posts/:id", async (request) => {
+    const params = requireObject(request.params, "Route params must be an object.");
+    const postId = normalizePostId(requireString(params.id, "id"));
+    const post = await app.repository.findPostById(postId);
+
+    if (!post) {
+      throw new ApiError(404, "POST_NOT_FOUND", "Post was not found.");
+    }
+
+    return {
+      post: toPost(post)
+    };
+  });
+
+  app.delete("/posts/:id", async (request, reply) => {
+    const { user } = await requireAuthenticatedUser(request, app);
+    const params = requireObject(request.params, "Route params must be an object.");
+    const postId = normalizePostId(requireString(params.id, "id"));
+    const post = await app.repository.findPostById(postId, { includeInactive: true });
+
+    if (!post || post.status === "removed") {
+      throw new ApiError(404, "POST_NOT_FOUND", "Post was not found.");
+    }
+
+    if (post.user.id !== user.id) {
+      throw new ApiError(403, "FORBIDDEN", "You can only delete your own posts.");
+    }
+
+    await app.repository.softDeletePost(postId);
+
+    return reply.status(204).send();
+  });
+};
+
 export const buildApiServer = (options: BuildApiServerOptions = {}): FastifyInstance => {
   const config = options.config ?? loadApiConfig();
   const database = options.database ?? createDatabaseClient(config.databaseUrl, { max: 1 });
   const redis = options.redis ?? createRedisClient(config.redisUrl);
   const repository = options.repository ?? createDatabaseRepository(database);
   const authProvider = options.authProvider ?? createSupabaseAuthProvider(config);
+  const jobs = options.jobs ?? createBackgroundJobQueue();
   const app = fastify({
     logger: options.logger ?? false
   });
   const ownsDatabase = !options.database;
   const ownsRedis = !options.redis;
+  const ownsJobs = !options.jobs;
 
   app.decorate("config", config);
   app.decorate("database", database);
   app.decorate("redis", redis);
   app.decorate("repository", repository);
   app.decorate("authProvider", authProvider);
+  app.decorate("jobs", jobs);
 
   app.setNotFoundHandler((request, reply) =>
     sendErrorResponse(reply, 404, "NOT_FOUND", `Route ${request.method}:${request.url} not found`)
@@ -558,8 +1032,14 @@ export const buildApiServer = (options: BuildApiServerOptions = {}): FastifyInst
   registerAuthRoutes(app);
   registerUserRoutes(app);
   registerCategoryRoutes(app);
+  registerUploadRoutes(app);
+  registerPostRoutes(app);
 
   app.addHook("onClose", async () => {
+    if (ownsJobs) {
+      await jobs.close();
+    }
+
     if (ownsRedis) {
       await redis.close();
     }
