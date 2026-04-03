@@ -4,6 +4,7 @@
     "baseUrl": ".",
     "paths": {
       "@dupe-hunt/config": ["packages/config/src/index.ts"],
+      "@dupe-hunt/db": ["packages/db/src/index.ts"],
       "@dupe-hunt/types": ["packages/types/src/index.ts"]
     }
   },

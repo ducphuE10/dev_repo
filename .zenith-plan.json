@@ -1,6 +1,6 @@
 {
   "version": 1,
-  "task_summary": "Build Dupe Hunt from its current docs-only state into a working community-powered dupe discovery platform with a pnpm/Turborepo TypeScript monorepo, Fastify API, Expo mobile app, and Next.js SEO web layer.",
+  "task_summary": "Continue building Dupe Hunt from its current monorepo scaffold into a working community-powered dupe discovery platform with a Fastify API, Expo mobile app, and Next.js SEO web layer.",
   "quality_commands": {
     "lint": "pnpm lint",
     "typecheck": "pnpm typecheck",
@@ -43,8 +43,8 @@
         "A documented local workflow exists to run migrations against development services."
       ],
       "priority": 3,
-      "status": "pending",
-      "completed_in_iteration": null
+      "status": "completed",
+      "completed_in_iteration": 4
     },
     {
       "id": "ST-4",
@@ -165,8 +165,8 @@
     }
   ],
   "discovered_issues": [
-    "The repository is currently docs-only: the documented apps/, packages/, package.json, pnpm-workspace.yaml, and turbo.json files do not exist yet.",
-    "No test, lint, or typecheck commands are currently configured, so quality_commands is intentionally empty until the workspace bootstrap is implemented.",
-    "README setup and dev commands are aspirational in the current branch and will fail until the initial scaffold exists."
+    "The API, web, and mobile apps are still workspace stubs, so README runtime expectations beyond bootstrap remain aspirational until ST-4, ST-8, and ST-11 land.",
+    "The root lint command is still a custom workspace invariant check rather than a full code-style linter such as ESLint or Biome.",
+    "The database migration workflow is now local-first and file-backed, but it has not yet been exercised through the Fastify app because the API service is still scaffold-only."
   ]
 }

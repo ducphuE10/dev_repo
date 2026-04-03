@@ -1,4 +1,4 @@
-# Dupe Hunt 🔍
+# Dupe Hunt
 
 > *"Real people. Real dupes. Real savings."*
 
@@ -83,7 +83,7 @@ cp apps/web/.env.example apps/web/.env
 cp apps/mobile/.env.example apps/mobile/.env
 
 # Start local infrastructure (Postgres + Redis)
-docker-compose up -d
+docker compose up -d
 
 # Run database migrations
 pnpm db:migrate
@@ -99,6 +99,8 @@ pnpm dev --filter=api       # API on http://localhost:3001
 pnpm dev --filter=web       # Web on http://localhost:3000
 pnpm dev --filter=mobile    # Expo dev server
 ```
+
+If `5432` or `6379` is already in use on your machine, override the host bindings for Docker Compose, for example `POSTGRES_PORT=55432 REDIS_PORT=56379 docker compose up -d`, and point `DATABASE_URL` / `REDIS_URL` at those ports in `apps/api/.env`.
 
 ---
 
@@ -130,6 +132,12 @@ pnpm dev --filter=mobile    # Expo dev server
 - Web: browse + SEO only
 
 See [`docs/plan.md`](docs/plan.md) for the full phased build plan.
+
+## Current Status
+
+- Workspace bootstrap, shared config, and the initial database package are implemented.
+- `packages/db` now owns the Drizzle schema, sequential SQL migrations, and the root `pnpm db:migrate` workflow.
+- `apps/api`, `apps/web`, and `apps/mobile` are still scaffolds, so the framework-specific runtime commands documented above remain upcoming work.
 
 ---
 

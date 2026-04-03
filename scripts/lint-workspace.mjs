@@ -33,6 +33,26 @@ for (const relativePath of envExamplePaths) {
   await readFile(path.join(rootDir, relativePath), "utf8");
 }
 
+const requiredDatabaseArtifacts = [
+  "docker-compose.yml",
+  "packages/db/scripts/migrate.mjs",
+  "packages/db/src/schema.ts",
+  "packages/db/src/client.ts",
+  "packages/db/migrations/001_enable_pgcrypto_and_create_users.sql",
+  "packages/db/migrations/002_create_categories.sql",
+  "packages/db/migrations/003_create_posts.sql",
+  "packages/db/migrations/004_create_upvotes_downvotes.sql",
+  "packages/db/migrations/005_create_flags.sql",
+  "packages/db/migrations/006_create_saves.sql",
+  "packages/db/migrations/007_create_follows.sql",
+  "packages/db/migrations/008_create_user_categories.sql",
+  "packages/db/migrations/009_create_affiliate_clicks.sql"
+];
+
+for (const relativePath of requiredDatabaseArtifacts) {
+  await readFile(path.join(rootDir, relativePath), "utf8");
+}
+
 console.log(
-  `Workspace lint passed for ${expectedWorkspaces.length} packages and ${envExamplePaths.length} env examples.`
+  `Workspace lint passed for ${expectedWorkspaces.length} packages, ${envExamplePaths.length} env examples, and ${requiredDatabaseArtifacts.length} database artifacts.`
 );
