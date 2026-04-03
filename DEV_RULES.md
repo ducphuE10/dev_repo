@@ -10,7 +10,7 @@ Read this before touching any code.
 1. **Read before you write.** Always read the relevant file(s) before editing. Never assume structure.
 2. **One concern per PR.** Don't mix feature work, refactors, and bug fixes in one commit.
 3. **No code without a spec.** Every feature must trace back to `docs/design.md`, `docs/technical.md`, or `docs/plan.md`. If it's not there, discuss it first.
-4. **Log your work.** Every meaningful change gets an entry in `PROGRESS.txt`. See the format below.
+4. **Log your work.** Every meaningful change gets an entry in `.zenith-progress.md`. See the format below.
 5. **Don't break the feed.** The home feed is the core product. Any change touching feed ranking, post queries, or category filtering requires explicit testing before merge.
 6. **Affiliate links are revenue.** Never skip the affiliate click tracking step. Every "Buy This Dupe" tap must record a row in `affiliate_clicks`.
 7. **Receipts are private.** Receipt images live in the private R2 bucket and are NEVER exposed publicly. Do not add any endpoint that returns receipt URLs to end users.
@@ -156,7 +156,7 @@ pnpm test --filter=api # api only
 
 ## 8. Progress Report Format
 
-**APPEND to `PROGRESS.txt`** after every meaningful implementation session. Never replace — always append.
+**APPEND to `.zenith-progress.md`** after every meaningful implementation session. Never replace — always append.
 
 ```
 ## [YYYY-MM-DD HH:MM] - [Phase X / Story / Task Name]
@@ -180,7 +180,7 @@ The **Learnings** section is critical — it helps future contributors (human or
 
 ### Consolidating Reusable Patterns
 
-If you discover a pattern that all future contributors should know, add it to the `## Codebase Patterns` section at the **TOP** of `PROGRESS.txt`. Create the section if it doesn't exist yet.
+If you discover a pattern that all future contributors should know, add it to the `## Codebase Patterns` section at the **TOP** of `.zenith-progress.md`. Create the section if it doesn't exist yet.
 
 ```
 ## Codebase Patterns
@@ -209,5 +209,5 @@ Before checking off a task in `docs/plan.md`:
 - [ ] No TypeScript errors (`pnpm typecheck`)
 - [ ] No lint errors (`pnpm lint`)
 - [ ] Relevant tests pass (`pnpm test`)
-- [ ] `PROGRESS.txt` has been updated
+- [ ] `.zenith-progress.md` has been updated
 - [ ] Changes are committed with a proper commit message
