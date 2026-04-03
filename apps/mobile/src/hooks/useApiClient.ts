@@ -1,13 +1,11 @@
 import { useAuthSession } from "../auth/AuthSessionProvider.tsx";
 import { createApiClient } from "../lib/api.ts";
 
-export const useApiClient = (options?: { requireServerAuth?: boolean }) => {
+export const useApiClient = (options?: { requireAuth?: boolean }) => {
   const { session } = useAuthSession();
-  const accessToken =
-    options?.requireServerAuth && session?.mode === "server" ? session.accessToken : options?.requireServerAuth ? null : null;
+  const accessToken = options?.requireAuth ? session?.accessToken ?? null : session?.accessToken ?? null;
 
   return createApiClient({
-    accessToken,
-    authMode: session?.mode ?? "preview"
+    accessToken
   });
 };

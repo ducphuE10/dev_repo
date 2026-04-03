@@ -1,3 +1,5 @@
+import { useState } from "react";
+
 import { ActivityIndicator, Pressable, StyleSheet, Text, View } from "react-native";
 
 import { useAuthSession } from "../auth/AuthSessionProvider.tsx";
@@ -31,7 +33,7 @@ export const CategorySelectScreen = ({ navigation }: OnboardingScreenProps) => {
     <ScreenFrame
       eyebrow="Onboarding"
       title="Teach the feed your taste"
-      description="Categories come from the live API. Selection is persisted in the local auth shell now, then upgraded to server-backed preference sync in the next mobile iteration."
+      description="Categories come from the live API, and your picks are written back to `/users/me/categories` before the app opens."
       footer={<PrimaryButton disabled={selectedCategoryIds.length === 0} label="Continue" onPress={() => navigation.navigate("OnboardingComplete")} />}
     >
       {isLoading ? <ActivityIndicator color="#FF5A36" size="large" /> : null}
@@ -59,20 +61,37 @@ export const CategorySelectScreen = ({ navigation }: OnboardingScreenProps) => {
 
 export const OnboardingCompleteScreen = ({ navigation }: OnboardingScreenProps) => {
   const { completeOnboarding, draftCategoryIds } = useAuthSession();
+  const [errorMessage, setErrorMessage] = useState<string | null>(null);
+  const [isSubmitting, setIsSubmitting] = useState(false);
+
+  const handleComplete = async () => {
+    setIsSubmitting(true);
+    setErrorMessage(null);
+
+    try {
+      await completeOnboarding();
+    } catch (error) {
+      setErrorMessage(error instanceof Error ? error.message : "Something went wrong.");
+    } finally {
+      setIsSubmitting(false);
+    }
+  };
 
   return (
     <ScreenFrame
       eyebrow="Ready"
-      title="Your shell is wired"
-      description={`Selected ${draftCategoryIds.length} categories. The next mobile iteration can now focus on real auth, feed behavior, and onboarding API sync instead of app plumbing.`}
-      footer={<PrimaryButton label="Enter the app" onPress={completeOnboarding} />}
+      title="Your feed is personalized"
+      description={`Selected ${draftCategoryIds.length} categories. Saving here syncs your onboarding picks to the API and unlocks the live feed.`}
+      footer={<PrimaryButton disabled={isSubmitting} label="Enter the app" onPress={handleComplete} />}
     >
       <View style={styles.summaryCard}>
-        <Text style={styles.summaryTitle}>What is already in place</Text>
-        <Text style={styles.summaryBody}>SecureStore-backed auth session hydration</Text>
-        <Text style={styles.summaryBody}>Centralized stack and tab navigation</Text>
-        <Text style={styles.summaryBody}>React Query client and reusable API helpers</Text>
+        <Text style={styles.summaryTitle}>What happens next</Text>
+        <Text style={styles.summaryBody}>Your category picks are persisted to the profile.</Text>
+        <Text style={styles.summaryBody}>For You opens filtered to those categories.</Text>
+        <Text style={styles.summaryBody}>You can scroll into live post detail screens right away.</Text>
       </View>
+      {errorMessage ? <Text style={styles.errorText}>{errorMessage}</Text> : null}
+      {isSubmitting ? <ActivityIndicator color="#FF5A36" /> : null}
       <PrimaryButton label="Back to categories" onPress={navigation.goBack} variant="secondary" />
     </ScreenFrame>
   );

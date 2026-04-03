@@ -78,6 +78,7 @@ test("mobile workspace exposes an Expo shell with centralized navigation and ses
   const navigationSource = await readFile(path.join(rootDir, "apps/mobile/src/navigation/index.tsx"), "utf8");
   const authSource = await readFile(path.join(rootDir, "apps/mobile/src/auth/AuthSessionProvider.tsx"), "utf8");
   const apiSource = await readFile(path.join(rootDir, "apps/mobile/src/lib/api.ts"), "utf8");
+  const mainScreensSource = await readFile(path.join(rootDir, "apps/mobile/src/screens/MainScreens.tsx"), "utf8");
 
   assert.equal(manifest.main, "expo/AppEntry");
   assert.equal(manifest.scripts.dev, "expo start --clear");
@@ -90,6 +91,10 @@ test("mobile workspace exposes an Expo shell with centralized navigation and ses
   assert.match(authSource, /expo-secure-store/);
   assert.match(authSource, /dupe-hunt\.mobile\.session/);
   assert.match(apiSource, /parseEnvironment\(mobileEnvironmentContract/);
+  assert.match(apiSource, /\/auth\/login/);
+  assert.match(apiSource, /\/auth\/refresh/);
+  assert.match(mainScreensSource, /FlatList/);
+  assert.match(mainScreensSource, /DupeDetailScreen/);
 });
 
 test("database workspace exposes drizzle schema and migration workflow", async () => {

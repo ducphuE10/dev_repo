@@ -121,8 +121,8 @@
         "The mobile app handles loading, empty, and basic error states for the implemented screens."
       ],
       "priority": 9,
-      "status": "pending",
-      "completed_in_iteration": null
+      "status": "completed",
+      "completed_in_iteration": 7
     },
     {
       "id": "ST-10",
@@ -165,7 +165,7 @@
     }
   ],
   "discovered_issues": [
-    "The web and mobile apps are still workspace stubs, so README runtime expectations beyond the API remain aspirational until ST-8 and ST-11 land.",
+    "The web app is still a workspace stub, so README runtime expectations for the browse/SEO experience remain aspirational until ST-11 lands.",
     "The root lint command is still a custom workspace invariant check rather than a full code-style linter such as ESLint or Biome.",
     "The API now enqueues background work through an app-local job queue seam for post creation, but real BullMQ-backed worker execution is still deferred until the later worker-heavy iterations flesh out processing and caching infrastructure."
   ]

@@ -76,13 +76,30 @@ export interface ApiCategoryListResponse {
   categories: ApiCategory[];
 }
 
+export interface ApiUserCategoryListResponse {
+  categories: ApiCategory[];
+}
+
 export interface ApiCurrentUserResponse {
   user: ApiCurrentUser;
+}
+
+export interface ApiAuthResponse {
+  user: {
+    id: string;
+    username: string;
+  };
+  token: string;
+  refresh_token: string;
 }
 
 export interface ApiFeedResponse {
   posts: ApiPost[];
   next_cursor: string | null;
+}
+
+export interface ApiPostResponse {
+  post: ApiPost;
 }
 
 export interface EnvironmentVariableSpec {

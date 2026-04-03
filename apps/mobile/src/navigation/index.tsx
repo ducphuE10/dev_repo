@@ -6,6 +6,7 @@ import { ScreenFrame } from "../components/ScreenFrame.tsx";
 import { useAuthSession } from "../auth/AuthSessionProvider.tsx";
 import { LoginScreen, RegisterScreen, WelcomeScreen } from "../screens/AuthScreens.tsx";
 import {
+  DupeDetailScreen,
   FeedScreen,
   NotificationsScreen,
   PostComposerScreen,
@@ -25,6 +26,11 @@ type OnboardingStackParamList = {
   OnboardingComplete: undefined;
 };
 
+type HomeStackParamList = {
+  FeedHome: undefined;
+  DupeDetail: { postId: string };
+};
+
 type MainTabParamList = {
   Home: undefined;
   Search: undefined;
@@ -35,6 +41,7 @@ type MainTabParamList = {
 
 const AuthStack = createNativeStackNavigator<AuthStackParamList>();
 const OnboardingStack = createNativeStackNavigator<OnboardingStackParamList>();
+const HomeStack = createNativeStackNavigator<HomeStackParamList>();
 const MainTabs = createBottomTabNavigator<MainTabParamList>();
 
 const navigationTheme = {
@@ -101,6 +108,25 @@ const OnboardingNavigator = () => (
   </OnboardingStack.Navigator>
 );
 
+const HomeNavigator = () => (
+  <HomeStack.Navigator
+    initialRouteName="FeedHome"
+    screenOptions={{
+      headerShadowVisible: false,
+      headerStyle: {
+        backgroundColor: "#FFF9F2"
+      },
+      headerTintColor: "#22170F",
+      contentStyle: {
+        backgroundColor: "#F8EFE6"
+      }
+    }}
+  >
+    <HomeStack.Screen name="FeedHome" component={FeedScreen} options={{ headerShown: false }} />
+    <HomeStack.Screen name="DupeDetail" component={DupeDetailScreen} options={{ title: "Dupe detail" }} />
+  </HomeStack.Navigator>
+);
+
 const MainNavigator = () => (
   <MainTabs.Navigator
     screenOptions={{
@@ -120,7 +146,7 @@ const MainNavigator = () => (
       }
     }}
   >
-    <MainTabs.Screen name="Home" component={FeedScreen} />
+    <MainTabs.Screen name="Home" component={HomeNavigator} options={{ headerShown: false }} />
     <MainTabs.Screen name="Search" component={SearchScreen} />
     <MainTabs.Screen name="Post" component={PostComposerScreen} />
     <MainTabs.Screen name="Notifications" component={NotificationsScreen} />
@@ -136,8 +162,8 @@ export const RootNavigator = () => {
       {!isHydrated ? (
         <ScreenFrame
           eyebrow="Booting"
-          title="Restoring your Dupe Hunt shell"
-          description="Loading the saved session, auth tokens, and React Query cache wiring."
+          title="Restoring your Dupe Hunt account"
+          description="Refreshing the saved session, auth tokens, and onboarding state."
         />
       ) : !session ? (
         <AuthNavigator />
