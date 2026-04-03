@@ -69,8 +69,8 @@
         "Integration tests cover success and failure paths for auth and user/category flows."
       ],
       "priority": 5,
-      "status": "pending",
-      "completed_in_iteration": null
+      "status": "completed",
+      "completed_in_iteration": 6
     },
     {
       "id": "ST-6",

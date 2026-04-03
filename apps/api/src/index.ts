@@ -5,4 +5,6 @@ export const apiWorkspace = {
 } as const;
 
 export * from "./app.ts";
+export * from "./auth.ts";
 export * from "./config.ts";
+export * from "./repository.ts";
