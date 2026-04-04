@@ -188,8 +188,8 @@
         "User-facing safeguards cover the key loading, empty, and failure cases for launch-critical flows."
       ],
       "priority": 14,
-      "status": "pending",
-      "completed_in_iteration": null,
+      "status": "completed",
+      "completed_in_iteration": 13,
       "discovered_in_iteration": 11
     },
     {

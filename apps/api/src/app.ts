@@ -176,6 +176,10 @@ const flagReasons = new Set<FlagReason>(["spam", "fake", "inappropriate", "affil
 const searchSorts = new Set<SearchSort>(["upvotes", "newest"]);
 const oneDayInMilliseconds = 24 * 60 * 60 * 1000;
 const searchTrendingRedisKey = "search:trending";
+const standardDailyPostLimit = 5;
+const topContributorDailyPostLimit = 10;
+const standardDailyAffiliatePostLimit = 2;
+const topContributorDailyAffiliatePostLimit = 5;
 
 const requireObject = (value: unknown, message = "Request body must be an object.") => {
   if (!value || typeof value !== "object" || Array.isArray(value)) {
@@ -509,6 +513,14 @@ const inferAffiliatePlatform = (url: string | undefined) => {
 
 const normalizeSearchTerm = (value: string) => value.trim().replace(/\s+/g, " ").toLowerCase();
 
+const readUtcDateStamp = () => new Date().toISOString().slice(0, 10);
+
+const readDailyPostLimit = (user: UserRecord) =>
+  user.contributorTier === "top_contributor" ? topContributorDailyPostLimit : standardDailyPostLimit;
+
+const readDailyAffiliatePostLimit = (user: UserRecord) =>
+  user.contributorTier === "top_contributor" ? topContributorDailyAffiliatePostLimit : standardDailyAffiliatePostLimit;
+
 const applyAffiliateTracking = (url: string, platform: string | null) => {
   const redirectUrl = new URL(url);
 
@@ -740,6 +752,48 @@ const requireOwnedPost = async (request: FastifyRequest, app: FastifyInstance, p
     user,
     post
   };
+};
+
+const requirePostCreationAllowed = async (user: UserRecord, app: FastifyInstance, affiliateLink: string | undefined) => {
+  const today = readUtcDateStamp();
+
+  if (user.lastPostDate === today && user.postsPerDayCount >= readDailyPostLimit(user)) {
+    throw new ApiError(429, "POST_RATE_LIMITED", "You have reached today's posting limit. Try again tomorrow.");
+  }
+
+  if (!affiliateLink) {
+    return;
+  }
+
+  const affiliatePostsToday = await app.repository.countUserPostsCreatedOnDate(user.id, today, {
+    withAffiliateLink: true
+  });
+
+  if (affiliatePostsToday >= readDailyAffiliatePostLimit(user)) {
+    throw new ApiError(
+      429,
+      "AFFILIATE_POST_RATE_LIMITED",
+      "Affiliate links are limited for this creator today. Try again tomorrow or publish without a link."
+    );
+  }
+};
+
+const requireReceiptVerificationEligible = (post: PostRecord) => {
+  if (post.status !== "active") {
+    throw new ApiError(409, "POST_NOT_ELIGIBLE", "Only active posts can accept receipt verification.");
+  }
+
+  if (post.receiptVerificationStatus === "pending") {
+    throw new ApiError(
+      409,
+      "RECEIPT_VERIFICATION_IN_PROGRESS",
+      "Receipt verification is already in progress for this post."
+    );
+  }
+
+  if (post.receiptVerificationStatus === "verified") {
+    throw new ApiError(409, "RECEIPT_ALREADY_VERIFIED", "This post already has a verified receipt on file.");
+  }
 };
 
 const readReceiptKey = (value: unknown, userId: string, postId: string) => {
@@ -1068,7 +1122,8 @@ const registerUploadRoutes = (app: FastifyInstance) => {
   app.post("/upload/receipt", async (request) => {
     const body = requireObject(request.body);
     const postId = normalizePostId(requireString(body.post_id, "post_id"));
-    const { user } = await requireOwnedPost(request, app, postId);
+    const { user, post } = await requireOwnedPost(request, app, postId);
+    requireReceiptVerificationEligible(post);
     const contentType = readReceiptContentType(body.content_type);
     const fileName = readOptionalString(body.file_name, "file_name", 255);
     const key = createReceiptStorageKey(user.id, postId, fileName, contentType);
@@ -1096,6 +1151,7 @@ const registerPostRoutes = (app: FastifyInstance) => {
 
     const mediaType = normalizeMediaType(body.media_type);
     const affiliateLink = readOptionalUrl(body.affiliate_link, "affiliate_link");
+    await requirePostCreationAllowed(user, app, affiliateLink);
     const input: CreatePostInput = {
       userId: user.id,
       categoryId,
@@ -1338,7 +1394,8 @@ const registerPostRoutes = (app: FastifyInstance) => {
     const params = requireObject(request.params, "Route params must be an object.");
     const body = requireObject(request.body);
     const postId = normalizePostId(requireString(params.id, "id"));
-    const { user } = await requireOwnedPost(request, app, postId);
+    const { user, post: existingPost } = await requireOwnedPost(request, app, postId);
+    requireReceiptVerificationEligible(existingPost);
     const receiptKey = readReceiptKey(body.receipt_key, user.id, postId);
     const post = await app.repository.attachReceiptToPost(postId, createPrivateObjectReference(app.config, receiptKey));
 
@@ -1465,10 +1522,32 @@ const registerAffiliateRoutes = (app: FastifyInstance) => {
 const registerAdminRoutes = (app: FastifyInstance) => {
   app.get("/admin/flags", async (request) => {
     requireAdminRequest(request, app);
+    const query = requireObject(request.query, "Query params must be an object.");
+    const categorySlug = readOptionalCategorySlug(query.category);
+    const authorUsername =
+      query.username === undefined ? undefined : normalizeUsername(requireString(query.username, "username"));
+    const limit = query.limit === undefined ? 50 : readFeedLimit(query.limit);
     const posts = await app.repository.listFlaggedPosts();
+    const filteredPosts = posts.filter((post) => {
+      if (categorySlug && post.category.slug !== categorySlug) {
+        return false;
+      }
+
+      if (authorUsername && post.user.username.toLowerCase() !== authorUsername.toLowerCase()) {
+        return false;
+      }
+
+      return true;
+    });
 
     return {
-      posts: posts.map(toPost)
+      queue: {
+        total_flagged_posts: filteredPosts.length,
+        returned_posts: Math.min(filteredPosts.length, limit),
+        category: categorySlug ?? null,
+        username: authorUsername ?? null
+      },
+      posts: filteredPosts.slice(0, limit).map(toPost)
     };
   });
 

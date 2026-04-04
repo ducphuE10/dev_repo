@@ -146,6 +146,20 @@ export default async function PostPage({ params }: PostPageProps) {
       notFound();
     }
 
-    throw error;
+    return (
+      <div className="page-stack">
+        <section className="detail-hero">
+          <div className="detail-hero__copy">
+            <p className="eyebrow">Dupe detail</p>
+            <h1>This dupe page is temporarily unavailable.</h1>
+            <p className="hero-panel__lede">The product comparison could not be loaded right now, but the browse layer is still online.</p>
+          </div>
+          <div className="detail-hero__media">
+            <div className="detail-hero__placeholder">Live product media unavailable</div>
+          </div>
+        </section>
+        <DownloadAppBanner />
+      </div>
+    );
   }
 }

@@ -238,6 +238,26 @@ const ProfileStat = ({ label, value }: { label: string; value: string }) => (
   </View>
 );
 
+const RetryStatusCard = ({
+  actionLabel = "Retry",
+  isRetrying = false,
+  message,
+  onRetry,
+  title
+}: {
+  actionLabel?: string;
+  isRetrying?: boolean;
+  message: string;
+  onRetry: () => void;
+  title: string;
+}) => (
+  <View style={styles.card}>
+    <Text style={styles.cardTitle}>{title}</Text>
+    <Text style={styles.cardBody}>{message}</Text>
+    <PrimaryButton disabled={isRetrying} label={actionLabel} onPress={onRetry} variant="secondary" />
+  </View>
+);
+
 const PostActionBar = ({
   onOpenAuthor,
   post
@@ -422,7 +442,9 @@ const ComposerMediaSummary = ({ draft }: { draft: PostComposerDraft }) => {
 export const FeedScreen = ({ navigation }: FeedScreenProps) => {
   const [activeTab, setActiveTab] = useState<FeedTab>("for_you");
   const [selectedCategorySlug, setSelectedCategorySlug] = useState<string | null>(null);
-  const { data: categories, error: categoryError } = useCategoryOptionsQuery();
+  const categoryQuery = useCategoryOptionsQuery();
+  const categories = categoryQuery.data;
+  const categoryError = categoryQuery.error;
   const { session } = useAuthSession();
   const availableCategoryFilters =
     categories && activeTab === "for_you" && session?.selectedCategoryIds.length
@@ -497,8 +519,22 @@ export const FeedScreen = ({ navigation }: FeedScreenProps) => {
               />
             ) : null}
 
-            {categoryError ? <Text style={styles.errorText}>{categoryError.message}</Text> : null}
-            {feedQuery.error ? <Text style={styles.errorText}>{feedQuery.error.message}</Text> : null}
+            {categoryError ? (
+              <RetryStatusCard
+                isRetrying={categoryQuery.isRefetching}
+                message={categoryError.message}
+                onRetry={() => void categoryQuery.refetch()}
+                title="Could not load categories"
+              />
+            ) : null}
+            {feedQuery.error ? (
+              <RetryStatusCard
+                isRetrying={feedQuery.isRefetching}
+                message={feedQuery.error.message}
+                onRetry={() => void feedQuery.refetch()}
+                title="Could not load this feed"
+              />
+            ) : null}
             {feedQuery.isLoading ? <ActivityIndicator color="#FF5A36" size="large" /> : null}
           </View>
         }
@@ -719,7 +755,10 @@ export const PostFormatScreen = ({ navigation }: PostFormatScreenProps) => {
 };
 
 export const PostFormScreen = ({ navigation, route }: PostFormScreenProps) => {
-  const { data: categories, error, isLoading } = useCategoryOptionsQuery();
+  const categoryQuery = useCategoryOptionsQuery();
+  const categories = categoryQuery.data;
+  const error = categoryQuery.error;
+  const isLoading = categoryQuery.isLoading;
   const [draft, setDraft] = useState(route.params.draft);
   const [validationError, setValidationError] = useState<string | null>(null);
   const [selectionError, setSelectionError] = useState<string | null>(null);
@@ -788,7 +827,14 @@ export const PostFormScreen = ({ navigation, route }: PostFormScreenProps) => {
       <View style={styles.card}>
         <Text style={styles.cardTitle}>Category</Text>
         {isLoading ? <ActivityIndicator color="#FF5A36" /> : null}
-        {error ? <Text style={styles.errorText}>{error.message}</Text> : null}
+        {error ? (
+          <RetryStatusCard
+            isRetrying={categoryQuery.isRefetching}
+            message={error.message}
+            onRetry={() => void categoryQuery.refetch()}
+            title="Could not load categories"
+          />
+        ) : null}
         {categories ? (
           <View style={styles.chipRow}>
             {categories.map((category) => (
@@ -984,7 +1030,14 @@ export const ProfileScreen = ({ navigation }: ProfileScreenProps) => {
       footer={<PrimaryButton label="Sign out" onPress={signOut} variant="secondary" />}
     >
       {currentUserQuery.isLoading ? <ActivityIndicator color="#FF5A36" size="large" /> : null}
-      {currentUserQuery.error ? <Text style={styles.errorText}>{currentUserQuery.error.message}</Text> : null}
+      {currentUserQuery.error ? (
+        <RetryStatusCard
+          isRetrying={currentUserQuery.isRefetching}
+          message={currentUserQuery.error.message}
+          onRetry={() => void currentUserQuery.refetch()}
+          title="Could not load your profile"
+        />
+      ) : null}
       {currentUser ? (
         <>
           <View style={styles.card}>
@@ -1007,6 +1060,14 @@ export const ProfileScreen = ({ navigation }: ProfileScreenProps) => {
           <View style={styles.card}>
             <Text style={styles.cardTitle}>Saved preview</Text>
             {savedPostsQuery.isLoading ? <ActivityIndicator color="#FF5A36" /> : null}
+            {savedPostsQuery.error ? (
+              <RetryStatusCard
+                isRetrying={savedPostsQuery.isRefetching}
+                message={savedPostsQuery.error.message}
+                onRetry={() => void savedPostsQuery.refetch()}
+                title="Could not load saved posts"
+              />
+            ) : null}
             {!savedPostsQuery.isLoading && savedPosts.length === 0 ? (
               <Text style={styles.cardBody}>Nothing saved yet. Tap Save on a feed card to build your collection.</Text>
             ) : null}
@@ -1027,7 +1088,8 @@ export const ProfileScreen = ({ navigation }: ProfileScreenProps) => {
 
 export const SavedCollectionScreen = ({ navigation }: SavedCollectionScreenProps) => {
   const [selectedCategorySlug, setSelectedCategorySlug] = useState<string | null>(null);
-  const { data: categories } = useCategoryOptionsQuery();
+  const categoryQuery = useCategoryOptionsQuery();
+  const categories = categoryQuery.data;
   const savedPostsQuery = useSavedPostsQuery();
   const savedPosts = savedPostsQuery.data ?? [];
   const filteredPosts = selectedCategorySlug
@@ -1055,7 +1117,22 @@ export const SavedCollectionScreen = ({ navigation }: SavedCollectionScreenProps
                 selectedCategorySlug={selectedCategorySlug}
               />
             ) : null}
-            {savedPostsQuery.error ? <Text style={styles.errorText}>{savedPostsQuery.error.message}</Text> : null}
+            {categoryQuery.error ? (
+              <RetryStatusCard
+                isRetrying={categoryQuery.isRefetching}
+                message={categoryQuery.error.message}
+                onRetry={() => void categoryQuery.refetch()}
+                title="Could not load saved-post filters"
+              />
+            ) : null}
+            {savedPostsQuery.error ? (
+              <RetryStatusCard
+                isRetrying={savedPostsQuery.isRefetching}
+                message={savedPostsQuery.error.message}
+                onRetry={() => void savedPostsQuery.refetch()}
+                title="Could not load your saved collection"
+              />
+            ) : null}
           </View>
         }
         ListEmptyComponent={
@@ -1158,7 +1235,14 @@ export const PublicProfileScreen = ({ route }: PublicProfileScreenProps) => {
       }
     >
       {publicUserQuery.isLoading ? <ActivityIndicator color="#FF5A36" size="large" /> : null}
-      {publicUserQuery.error ? <Text style={styles.errorText}>{publicUserQuery.error.message}</Text> : null}
+      {publicUserQuery.error ? (
+        <RetryStatusCard
+          isRetrying={publicUserQuery.isRefetching}
+          message={publicUserQuery.error.message}
+          onRetry={() => void publicUserQuery.refetch()}
+          title="Could not load this creator"
+        />
+      ) : null}
       {publicUserQuery.data ? (
         <>
           <View style={styles.card}>

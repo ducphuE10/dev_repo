@@ -150,6 +150,13 @@ export interface ApiRepository {
   listActiveCategories: () => Promise<CategoryRecord[]>;
   listUserCategories: (userId: string) => Promise<CategoryRecord[]>;
   replaceUserCategories: (userId: string, categoryIds: number[]) => Promise<CategoryRecord[]>;
+  countUserPostsCreatedOnDate: (
+    userId: string,
+    date: string,
+    options?: {
+      withAffiliateLink?: boolean;
+    }
+  ) => Promise<number>;
   createPost: (input: CreatePostInput) => Promise<PostRecord>;
   findPostById: (postId: string, options?: FindPostOptions) => Promise<PostRecord | null>;
   listPosts: (input: ListPostsInput) => Promise<PostRecord[]>;
@@ -708,6 +715,20 @@ export const createDatabaseRepository = (database: DatabaseClient): ApiRepositor
           ORDER BY c.sort_order ASC, c.name ASC
         `
       ).map(mapCategoryRow);
+    },
+    countUserPostsCreatedOnDate: async (userId, date, options = {}) => {
+      const [result] = await database.sql<Array<{ count: number }>>`
+        SELECT COUNT(*)::INTEGER AS count
+        FROM posts
+        WHERE user_id = ${userId}
+          AND created_at::date = ${date}::date
+          AND (
+            ${options.withAffiliateLink ?? false} = FALSE
+            OR affiliate_link IS NOT NULL
+          )
+      `;
+
+      return result?.count ?? 0;
     },
     createPost: async (input) => {
       const insertedRows = await database.sql<{ id: string }[]>`

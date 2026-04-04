@@ -232,6 +232,7 @@ const createRepositoryDouble = () => {
   const affiliateClicks: Array<{ postId: string; userId: string | null; sessionId: string; affiliatePlatform: string | null }> = [];
   let postCounter = 2;
   let actionOrder = 1;
+  const currentDate = new Date().toISOString().slice(0, 10);
 
   const interactionKey = (userId: string, postId: string) => `${userId}:${postId}`;
   const isVisiblePost = (post: PostRecord) => post.status === "active" && post.category.isActive;
@@ -363,6 +364,22 @@ const createRepositoryDouble = () => {
       userCategorySelections.set(userId, [...categoryIds]);
       return repository.listUserCategories(userId);
     },
+    countUserPostsCreatedOnDate: async (userId, date, options = {}) =>
+      Array.from(posts.values()).filter((post) => {
+        if (post.userId !== userId) {
+          return false;
+        }
+
+        if (post.createdAt.slice(0, 10) !== date) {
+          return false;
+        }
+
+        if (options.withAffiliateLink && !post.affiliateLink) {
+          return false;
+        }
+
+        return true;
+      }).length,
     createPost: async (input: CreatePostInput) => {
       const user = users.get(input.userId);
       const category = categories.find((entry) => entry.id === input.categoryId);
@@ -400,7 +417,7 @@ const createRepositoryDouble = () => {
       users.set(user.id, {
         ...user,
         postsPerDayCount: user.postsPerDayCount + 1,
-        lastPostDate: "2026-04-03",
+        lastPostDate: currentDate,
         lastActiveAt: now
       });
       category.postCount += 1;
@@ -1504,6 +1521,67 @@ test("receipt verification enforces ownership and upload key matching", async (c
   assert.equal(invalidKeyResponse.statusCode, 400);
 });
 
+test("receipt verification blocks duplicate pending and already-verified submissions", async (context) => {
+  const { app, posts, users, createSession } = createTestServer();
+  const owner = createUserRecord();
+  users.set(owner.id, owner);
+  const pendingPost = createPostRecord({
+    id: "44444444-4444-4444-8444-000000000154",
+    user: owner,
+    userId: owner.id,
+    receiptUrl: "r2://dupe-hunt-media/receipts/pending.jpg",
+    receiptVerificationStatus: "pending"
+  });
+  const verifiedPost = createPostRecord({
+    id: "44444444-4444-4444-8444-000000000155",
+    user: owner,
+    userId: owner.id,
+    receiptUrl: "r2://dupe-hunt-media/receipts/verified.jpg",
+    receiptVerificationStatus: "verified",
+    isVerifiedBuy: true,
+    receiptVerifiedAt: now
+  });
+  posts.set(pendingPost.id, pendingPost);
+  posts.set(verifiedPost.id, verifiedPost);
+  const session = createSession(owner.id, owner.email, "password", "receipt-limit-refresh");
+
+  context.after(async () => {
+    await app.close();
+  });
+
+  const pendingUploadResponse = await app.inject({
+    method: "POST",
+    url: "/upload/receipt",
+    headers: {
+      authorization: `Bearer ${session.accessToken}`
+    },
+    payload: {
+      post_id: pendingPost.id,
+      content_type: "image/jpeg",
+      file_name: "duplicate-pending.jpg"
+    }
+  });
+
+  assert.equal(pendingUploadResponse.statusCode, 409);
+  assert.equal(pendingUploadResponse.json().error.code, "RECEIPT_VERIFICATION_IN_PROGRESS");
+
+  const verifiedUploadResponse = await app.inject({
+    method: "POST",
+    url: "/upload/receipt",
+    headers: {
+      authorization: `Bearer ${session.accessToken}`
+    },
+    payload: {
+      post_id: verifiedPost.id,
+      content_type: "image/jpeg",
+      file_name: "duplicate-verified.jpg"
+    }
+  });
+
+  assert.equal(verifiedUploadResponse.statusCode, 409);
+  assert.equal(verifiedUploadResponse.json().error.code, "RECEIPT_ALREADY_VERIFIED");
+});
+
 test("POST /posts creates a post and enqueues video and affiliate jobs when needed", async (context) => {
   const { app, categories, jobs, users, createSession } = createTestServer();
   const existingUser = createUserRecord();
@@ -1543,6 +1621,103 @@ test("POST /posts creates a post and enqueues video and affiliate jobs when need
     ["process-video", "wrap-affiliate-link"]
   );
   assert.equal(jobs[1]?.payload.affiliatePlatform, "amazon");
+});
+
+test("POST /posts enforces daily posting and affiliate-link abuse limits", async (context) => {
+  const { app, categories, posts, users, createSession } = createTestServer();
+  const today = new Date().toISOString().slice(0, 10);
+  const limitedUser = createUserRecord({
+    id: "44444444-1111-4111-8111-111111111111",
+    username: "posting_limit",
+    email: "posting-limit@example.com",
+    lastPostDate: today,
+    postsPerDayCount: 5
+  });
+  const affiliateLimitedUser = createUserRecord({
+    id: "55555555-1111-4111-8111-111111111111",
+    username: "affiliate_limit",
+    email: "affiliate-limit@example.com"
+  });
+  users.set(limitedUser.id, limitedUser);
+  users.set(affiliateLimitedUser.id, affiliateLimitedUser);
+  posts.set(
+    "44444444-4444-4444-8444-000000000156",
+    createPostRecord({
+      id: "44444444-4444-4444-8444-000000000156",
+      user: affiliateLimitedUser,
+      userId: affiliateLimitedUser.id,
+      category: categories[0]!,
+      categoryId: categories[0]!.id,
+      affiliateLink: "https://www.amazon.com/existing-1",
+      affiliatePlatform: "amazon",
+      createdAt: `${today}T08:00:00.000Z`
+    })
+  );
+  posts.set(
+    "44444444-4444-4444-8444-000000000157",
+    createPostRecord({
+      id: "44444444-4444-4444-8444-000000000157",
+      user: affiliateLimitedUser,
+      userId: affiliateLimitedUser.id,
+      category: categories[0]!,
+      categoryId: categories[0]!.id,
+      affiliateLink: "https://www.amazon.com/existing-2",
+      affiliatePlatform: "amazon",
+      createdAt: `${today}T09:00:00.000Z`
+    })
+  );
+  const limitedSession = createSession(limitedUser.id, limitedUser.email, "password", "daily-post-limit-refresh");
+  const affiliateSession = createSession(
+    affiliateLimitedUser.id,
+    affiliateLimitedUser.email,
+    "password",
+    "affiliate-post-limit-refresh"
+  );
+
+  context.after(async () => {
+    await app.close();
+  });
+
+  const postLimitResponse = await app.inject({
+    method: "POST",
+    url: "/posts",
+    headers: {
+      authorization: `Bearer ${limitedSession.accessToken}`
+    },
+    payload: {
+      category_id: categories[0]?.id,
+      original_product_name: "Daily limit original",
+      original_price: 100,
+      dupe_product_name: "Daily limit dupe",
+      dupe_price: 30,
+      media_type: "photo",
+      media_urls: ["https://dupe-hunt-media.r2.dev/posts/daily-limit.jpg"]
+    }
+  });
+
+  assert.equal(postLimitResponse.statusCode, 429);
+  assert.equal(postLimitResponse.json().error.code, "POST_RATE_LIMITED");
+
+  const affiliateLimitResponse = await app.inject({
+    method: "POST",
+    url: "/posts",
+    headers: {
+      authorization: `Bearer ${affiliateSession.accessToken}`
+    },
+    payload: {
+      category_id: categories[0]?.id,
+      original_product_name: "Affiliate limit original",
+      original_price: 80,
+      dupe_product_name: "Affiliate limit dupe",
+      dupe_price: 20,
+      media_type: "photo",
+      media_urls: ["https://dupe-hunt-media.r2.dev/posts/affiliate-limit.jpg"],
+      affiliate_link: "https://www.amazon.com/new-affiliate"
+    }
+  });
+
+  assert.equal(affiliateLimitResponse.statusCode, 429);
+  assert.equal(affiliateLimitResponse.json().error.code, "AFFILIATE_POST_RATE_LIMITED");
 });
 
 test("GET /posts applies for-you ranking, category preferences, and cursor pagination", async (context) => {
@@ -1908,10 +2083,16 @@ test("social routes persist vote, save, and follow state while enqueuing count-s
   );
 });
 
-test("flagging a post auto-flags it after five reports and surfaces it in the admin queue", async (context) => {
+test("flagging a post auto-flags it after five reports and surfaces it in the filtered admin queue", async (context) => {
   const { app, categories, jobs, posts, users, createSession } = createTestServer();
   const author = createUserRecord();
+  const secondAuthor = createUserRecord({
+    id: "55555555-2222-4222-8222-222222222222",
+    username: "second_author",
+    email: "second-author@example.com"
+  });
   users.set(author.id, author);
+  users.set(secondAuthor.id, secondAuthor);
   const post = createPostRecord({
     id: "44444444-4444-4444-8444-000000000402",
     user: author,
@@ -1919,7 +2100,17 @@ test("flagging a post auto-flags it after five reports and surfaces it in the ad
     category: categories[0]!,
     categoryId: categories[0]!.id
   });
+  const secondPost = createPostRecord({
+    id: "44444444-4444-4444-8444-000000000403",
+    user: secondAuthor,
+    userId: secondAuthor.id,
+    category: categories[1]!,
+    categoryId: categories[1]!.id,
+    status: "flagged",
+    flagCount: 7
+  });
   posts.set(post.id, post);
+  posts.set(secondPost.id, secondPost);
   const reporters = Array.from({ length: 5 }, (_, index) =>
     createUserRecord({
       id: `55555555-5555-4555-8555-${String(index + 1).padStart(12, "0")}`,
@@ -1960,13 +2151,19 @@ test("flagging a post auto-flags it after five reports and surfaces it in the ad
 
   const adminQueueResponse = await app.inject({
     method: "GET",
-    url: "/admin/flags",
+    url: `/admin/flags?category=${categories[0]?.slug}&username=${author.username}&limit=1`,
     headers: {
       "x-admin-key": "internal-admin-key"
     }
   });
 
   assert.equal(adminQueueResponse.statusCode, 200);
+  assert.deepEqual(adminQueueResponse.json().queue, {
+    total_flagged_posts: 1,
+    returned_posts: 1,
+    category: categories[0]?.slug,
+    username: author.username
+  });
   assert.deepEqual(
     adminQueueResponse.json().posts.map((entry: { id: string }) => entry.id),
     [post.id]

@@ -82,6 +82,22 @@ export default async function UserPage({ params }: UserPageProps) {
       notFound();
     }
 
-    throw error;
+    return (
+      <div className="page-stack">
+        <section className="profile-hero">
+          <div className="profile-hero__avatar">{username.slice(0, 1).toUpperCase()}</div>
+          <div className="profile-hero__body">
+            <p className="eyebrow">Creator profile</p>
+            <h1>@{username}</h1>
+            <p className="hero-panel__lede">This creator page is temporarily in fallback mode while live profile data reloads.</p>
+          </div>
+        </section>
+        <DownloadAppBanner />
+        <EmptyState
+          description="The creator profile could not load right now. Retry soon or browse community search instead."
+          title="Creator page unavailable"
+        />
+      </div>
+    );
   }
 }
