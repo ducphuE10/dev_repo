@@ -13,6 +13,7 @@ import {
   verifyAccessToken
 } from "./auth.ts";
 import { loadApiConfig, type ApiConfig } from "./config.ts";
+import { createReceiptVerificationJobHandler } from "./receipt-verification.ts";
 import {
   createDatabaseRepository,
   type ApiRepository,
@@ -41,6 +42,8 @@ export type BackgroundJobName =
   | "wrap-affiliate-link"
   | "update-post-counts"
   | "auto-flag-review";
+
+export type BackgroundJobHandler = (payload: Record<string, unknown>) => Promise<void>;
 
 export interface BackgroundJobQueue {
   enqueue: (jobName: BackgroundJobName, payload: Record<string, unknown>) => Promise<void>;
@@ -77,10 +80,37 @@ export const createRedisClient = (url: string): RedisClient => ({
   close: async () => undefined
 });
 
-export const createBackgroundJobQueue = (): BackgroundJobQueue => ({
-  enqueue: async () => undefined,
-  close: async () => undefined
-});
+export const createBackgroundJobQueue = (options: {
+  handlers?: Partial<Record<BackgroundJobName, BackgroundJobHandler>>;
+  onError?: (jobName: BackgroundJobName, error: unknown, payload: Record<string, unknown>) => void;
+} = {}): BackgroundJobQueue => {
+  const pendingJobs = new Set<Promise<void>>();
+
+  return {
+    enqueue: async (jobName, payload) => {
+      const handler = options.handlers?.[jobName];
+
+      if (!handler) {
+        return;
+      }
+
+      let task: Promise<void>;
+      task = Promise.resolve()
+        .then(() => handler(payload))
+        .catch((error) => {
+          options.onError?.(jobName, error, payload);
+        })
+        .finally(() => {
+          pendingJobs.delete(task);
+        });
+
+      pendingJobs.add(task);
+    },
+    close: async () => {
+      await Promise.allSettled(Array.from(pendingJobs));
+    }
+  };
+};
 
 declare module "fastify" {
   interface FastifyInstance {
@@ -533,18 +563,6 @@ const createPublicMediaUrl = (config: ApiConfig, key: string) => `https://${conf
 
 const createPrivateObjectReference = (config: ApiConfig, key: string) => `r2://${config.cloudflareR2Bucket}/${key}`;
 
-const getReceiptVerificationStatus = (post: PostRecord) => {
-  if (post.isVerifiedBuy) {
-    return "verified";
-  }
-
-  if (post.receiptUrl) {
-    return "pending";
-  }
-
-  return "not_submitted";
-};
-
 const toPublicUser = (user: UserRecord) => ({
   id: user.id,
   username: user.username,
@@ -593,7 +611,7 @@ const toPost = (post: PostRecord) => ({
   downvote_count: post.downvoteCount,
   flag_count: post.flagCount,
   is_verified_buy: post.isVerifiedBuy,
-  receipt_verification_status: getReceiptVerificationStatus(post),
+  receipt_verification_status: post.receiptVerificationStatus,
   receipt_verified_at: post.receiptVerifiedAt,
   status: post.status,
   created_at: post.createdAt,
@@ -1501,10 +1519,29 @@ export const buildApiServer = (options: BuildApiServerOptions = {}): FastifyInst
   const redis = options.redis ?? createRedisClient(config.redisUrl);
   const repository = options.repository ?? createDatabaseRepository(database);
   const authProvider = options.authProvider ?? createSupabaseAuthProvider(config);
-  const jobs = options.jobs ?? createBackgroundJobQueue();
   const app = fastify({
     logger: options.logger ?? false
   });
+  const jobs =
+    options.jobs ??
+    createBackgroundJobQueue({
+      handlers: {
+        "verify-receipt": createReceiptVerificationJobHandler({
+          config,
+          repository
+        })
+      },
+      onError: (jobName, error, payload) => {
+        app.log.error(
+          {
+            error,
+            jobName,
+            payload
+          },
+          "Background job failed."
+        );
+      }
+    });
   const ownsDatabase = !options.database;
   const ownsRedis = !options.redis;
   const ownsJobs = !options.jobs;

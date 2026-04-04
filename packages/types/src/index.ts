@@ -3,6 +3,7 @@ export type WorkspaceStatus = "scaffolded";
 export type WorkspaceAppName = "api" | "web" | "mobile";
 export type FeedTab = "for_you" | "trending" | "new";
 export type ApiPostMediaType = "photo" | "video";
+export type ApiReceiptVerificationStatus = "not_submitted" | "pending" | "verified" | "failed";
 
 export type WorkspacePackageName =
   | "@dupe-hunt/api"
@@ -66,7 +67,7 @@ export interface ApiPost {
   downvote_count: number;
   flag_count: number;
   is_verified_buy: boolean;
-  receipt_verification_status: "not_submitted" | "pending" | "verified";
+  receipt_verification_status: ApiReceiptVerificationStatus;
   receipt_verified_at: string | null;
   status: "active" | "flagged" | "removed";
   created_at: string;

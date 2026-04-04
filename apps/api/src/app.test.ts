@@ -4,8 +4,9 @@ import test from "node:test";
 import type { DatabaseClient } from "@dupe-hunt/db";
 
 import { signAccessToken, type AuthProvider, type AuthSession } from "./auth.ts";
-import { ApiError, buildApiServer, type BackgroundJobQueue, type RedisClient } from "./app.ts";
+import { ApiError, buildApiServer, createBackgroundJobQueue, type BackgroundJobQueue, type RedisClient } from "./app.ts";
 import { loadApiConfig, type ApiConfig } from "./config.ts";
+import { createReceiptVerificationJobHandler } from "./receipt-verification.ts";
 import {
   type ApiRepository,
   type CategoryRecord,
@@ -127,6 +128,9 @@ const createPostRecord = (overrides: Partial<PostRecord> = {}): PostRecord => {
     flagCount: overrides.flagCount ?? 0,
     isVerifiedBuy: overrides.isVerifiedBuy ?? false,
     receiptUrl: overrides.receiptUrl ?? null,
+    receiptVerificationStatus:
+      overrides.receiptVerificationStatus ??
+      (overrides.isVerifiedBuy ? "verified" : overrides.receiptUrl ? "pending" : "not_submitted"),
     receiptVerifiedAt: overrides.receiptVerifiedAt ?? null,
     status: overrides.status ?? "active",
     createdAt: overrides.createdAt ?? now,
@@ -232,7 +236,7 @@ const createRepositoryDouble = () => {
   const interactionKey = (userId: string, postId: string) => `${userId}:${postId}`;
   const isVisiblePost = (post: PostRecord) => post.status === "active" && post.category.isActive;
 
-  const refreshAuthorTotalUpvotes = (userId: string) => {
+  const refreshAuthorProfileStats = (userId: string) => {
     const author = users.get(userId);
 
     if (!author) {
@@ -242,10 +246,14 @@ const createRepositoryDouble = () => {
     const totalUpvotes = Array.from(posts.values())
       .filter((post) => post.userId === userId && post.status === "active")
       .reduce((sum, post) => sum + post.upvoteCount, 0);
+    const verifiedBuyCount = Array.from(posts.values()).filter(
+      (post) => post.userId === userId && post.status === "active" && post.isVerifiedBuy
+    ).length;
 
     users.set(userId, {
       ...author,
-      totalUpvotes
+      totalUpvotes,
+      verifiedBuyCount
     });
   };
 
@@ -265,7 +273,7 @@ const createRepositoryDouble = () => {
     };
 
     posts.set(postId, updated);
-    refreshAuthorTotalUpvotes(updated.userId);
+    refreshAuthorProfileStats(updated.userId);
 
     return updated;
   };
@@ -294,7 +302,7 @@ const createRepositoryDouble = () => {
     };
 
     posts.set(postId, updated);
-    refreshAuthorTotalUpvotes(updated.userId);
+    refreshAuthorProfileStats(updated.userId);
 
     return updated;
   };
@@ -604,11 +612,33 @@ const createRepositoryDouble = () => {
         ...existing,
         isVerifiedBuy: false,
         receiptUrl,
+        receiptVerificationStatus: "pending",
         receiptVerifiedAt: null,
         updatedAt: now
       };
 
       posts.set(postId, updated);
+      refreshAuthorProfileStats(updated.userId);
+
+      return updated;
+    },
+    resolveReceiptVerification: async (postId, status) => {
+      const existing = posts.get(postId);
+
+      if (!existing) {
+        return null;
+      }
+
+      const updated: PostRecord = {
+        ...existing,
+        isVerifiedBuy: status === "verified",
+        receiptVerificationStatus: status,
+        receiptVerifiedAt: status === "verified" ? now : null,
+        updatedAt: now
+      };
+
+      posts.set(postId, updated);
+      refreshAuthorProfileStats(updated.userId);
 
       return updated;
     },
@@ -1271,6 +1301,155 @@ test("receipt verification uploads stay private and enqueue OCR work without exp
     jobs.some((job) => job.name === "verify-receipt" && job.payload.postId === post.id),
     true
   );
+});
+
+test("verify-receipt jobs can resolve a post to verified and refresh creator verified-buy counts", async (context) => {
+  const config = createTestConfig();
+  const repositoryDouble = createRepositoryDouble();
+  const { authProvider, createSession } = createAuthProviderDouble(config);
+  const { redis } = createRedisDouble();
+  const queue = createBackgroundJobQueue({
+    handlers: {
+      "verify-receipt": createReceiptVerificationJobHandler({
+        config,
+        repository: repositoryDouble.repository,
+        ocrService: {
+          extractReceiptText: async () => "Sephora order\nHalo complexion set\n04/01/2026\nThank you"
+        },
+        now: () => new Date(now)
+      })
+    }
+  });
+  const app = buildApiServer({
+    config,
+    database: createDatabaseDouble(),
+    redis,
+    repository: repositoryDouble.repository,
+    authProvider,
+    jobs: queue
+  });
+  const owner = createUserRecord();
+  repositoryDouble.users.set(owner.id, owner);
+  const post = createPostRecord({
+    id: "44444444-4444-4444-8444-000000000152",
+    user: owner,
+    userId: owner.id
+  });
+  repositoryDouble.posts.set(post.id, post);
+  const session = createSession(owner.id, owner.email, "password", "receipt-worker-refresh");
+
+  context.after(async () => {
+    await queue.close();
+    await app.close();
+  });
+
+  const uploadResponse = await app.inject({
+    method: "POST",
+    url: "/upload/receipt",
+    headers: {
+      authorization: `Bearer ${session.accessToken}`
+    },
+    payload: {
+      post_id: post.id,
+      content_type: "image/jpeg",
+      file_name: "verified-receipt.jpg"
+    }
+  });
+
+  const verifyResponse = await app.inject({
+    method: "POST",
+    url: `/posts/${post.id}/verify`,
+    headers: {
+      authorization: `Bearer ${session.accessToken}`
+    },
+    payload: {
+      receipt_key: uploadResponse.json().receipt_key
+    }
+  });
+
+  assert.equal(verifyResponse.statusCode, 200);
+  assert.equal(verifyResponse.json().post.receipt_verification_status, "pending");
+
+  await queue.close();
+
+  assert.equal(repositoryDouble.posts.get(post.id)?.receiptVerificationStatus, "verified");
+  assert.equal(repositoryDouble.posts.get(post.id)?.isVerifiedBuy, true);
+  assert.equal(repositoryDouble.posts.get(post.id)?.receiptVerifiedAt, now);
+  assert.equal(repositoryDouble.users.get(owner.id)?.verifiedBuyCount, 1);
+});
+
+test("verify-receipt jobs can mark OCR failures without inflating creator verified-buy counts", async (context) => {
+  const config = createTestConfig();
+  const repositoryDouble = createRepositoryDouble();
+  const { authProvider, createSession } = createAuthProviderDouble(config);
+  const { redis } = createRedisDouble();
+  const queue = createBackgroundJobQueue({
+    handlers: {
+      "verify-receipt": createReceiptVerificationJobHandler({
+        config,
+        repository: repositoryDouble.repository,
+        ocrService: {
+          extractReceiptText: async () => "Generic order summary\n01/01/2025\nSubtotal 19.99"
+        },
+        now: () => new Date(now)
+      })
+    }
+  });
+  const app = buildApiServer({
+    config,
+    database: createDatabaseDouble(),
+    redis,
+    repository: repositoryDouble.repository,
+    authProvider,
+    jobs: queue
+  });
+  const owner = createUserRecord();
+  repositoryDouble.users.set(owner.id, owner);
+  const post = createPostRecord({
+    id: "44444444-4444-4444-8444-000000000153",
+    user: owner,
+    userId: owner.id
+  });
+  repositoryDouble.posts.set(post.id, post);
+  const session = createSession(owner.id, owner.email, "password", "receipt-worker-fail-refresh");
+
+  context.after(async () => {
+    await queue.close();
+    await app.close();
+  });
+
+  const uploadResponse = await app.inject({
+    method: "POST",
+    url: "/upload/receipt",
+    headers: {
+      authorization: `Bearer ${session.accessToken}`
+    },
+    payload: {
+      post_id: post.id,
+      content_type: "image/jpeg",
+      file_name: "failed-receipt.jpg"
+    }
+  });
+
+  const verifyResponse = await app.inject({
+    method: "POST",
+    url: `/posts/${post.id}/verify`,
+    headers: {
+      authorization: `Bearer ${session.accessToken}`
+    },
+    payload: {
+      receipt_key: uploadResponse.json().receipt_key
+    }
+  });
+
+  assert.equal(verifyResponse.statusCode, 200);
+
+  await queue.close();
+
+  assert.equal(repositoryDouble.posts.get(post.id)?.receiptVerificationStatus, "failed");
+  assert.equal(repositoryDouble.posts.get(post.id)?.isVerifiedBuy, false);
+  assert.equal(repositoryDouble.posts.get(post.id)?.receiptVerifiedAt, null);
+  assert.equal(repositoryDouble.users.get(owner.id)?.verifiedBuyCount, 0);
 });
 
 test("receipt verification enforces ownership and upload key matching", async (context) => {

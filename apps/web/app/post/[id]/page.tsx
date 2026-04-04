@@ -14,6 +14,19 @@ interface PostPageProps {
   }>;
 }
 
+const formatVerificationLabel = (status: "not_submitted" | "pending" | "verified" | "failed") => {
+  switch (status) {
+    case "verified":
+      return "Verified buy";
+    case "pending":
+      return "Receipt pending";
+    case "failed":
+      return "Receipt check failed";
+    default:
+      return "Community reviewed";
+  }
+};
+
 export async function generateMetadata({ params }: PostPageProps) {
   const { id } = await params;
 
@@ -52,7 +65,7 @@ export default async function PostPage({ params }: PostPageProps) {
             <div className="detail-hero__stats">
               <span>{formatCompactNumber(post.upvote_count)} upvotes</span>
               <span>{formatRelativeDate(post.created_at)}</span>
-              <span>{post.is_verified_buy ? "Verified buy" : "Community reviewed"}</span>
+              <span>{formatVerificationLabel(post.receipt_verification_status)}</span>
             </div>
 
             <div className="detail-hero__actions">
@@ -102,7 +115,15 @@ export default async function PostPage({ params }: PostPageProps) {
             <ul className="detail-list">
               <li>{formatPriceSaved(post.price_saved, post.dupe_currency)}</li>
               <li>{formatCompactNumber(post.upvote_count)} people upvoted this comparison</li>
-              <li>{post.is_verified_buy ? "Receipt-verified by the creator" : "Community reviewed and still browseable"}</li>
+              <li>
+                {post.receipt_verification_status === "verified"
+                  ? "Receipt-verified by the creator"
+                  : post.receipt_verification_status === "pending"
+                    ? "Receipt uploaded and still in OCR review"
+                    : post.receipt_verification_status === "failed"
+                      ? "Receipt OCR could not confirm this purchase"
+                      : "Community reviewed and still browseable"}
+              </li>
             </ul>
           </article>
 

@@ -20,6 +20,7 @@ import {
 export const contributorTierValues = ["standard", "top_contributor"] as const;
 export const mediaTypeValues = ["video", "photo"] as const;
 export const postStatusValues = ["active", "flagged", "removed"] as const;
+export const receiptVerificationStatusValues = ["not_submitted", "pending", "verified", "failed"] as const;
 export const flagReasonValues = ["spam", "fake", "inappropriate", "affiliate_abuse"] as const;
 
 export const users = pgTable("users", {
@@ -81,6 +82,12 @@ export const posts = pgTable(
     flagCount: integer("flag_count").notNull().default(0),
     isVerifiedBuy: boolean("is_verified_buy").notNull().default(false),
     receiptUrl: text("receipt_url"),
+    receiptVerificationStatus: varchar("receipt_verification_status", {
+      length: 20,
+      enum: receiptVerificationStatusValues
+    })
+      .notNull()
+      .default("not_submitted"),
     receiptVerifiedAt: timestamp("receipt_verified_at", { withTimezone: true }),
     status: varchar("status", { length: 20, enum: postStatusValues }).notNull().default("active"),
     createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),

@@ -8,6 +8,19 @@ interface PostCardProps {
   post: ApiPost;
 }
 
+const formatVerificationLabel = (post: ApiPost) => {
+  switch (post.receipt_verification_status) {
+    case "verified":
+      return "Verified buy";
+    case "pending":
+      return "Receipt pending";
+    case "failed":
+      return "Receipt check failed";
+    default:
+      return "Community pick";
+  }
+};
+
 const renderMedia = (post: ApiPost) => {
   const mediaUrl = post.media_urls[0];
 
@@ -51,7 +64,7 @@ export const PostCard = ({ post }: PostCardProps) => (
           <span className="post-card__avatar">{post.user.username.slice(0, 1).toUpperCase()}</span>
           <span>
             @{post.user.username}
-            <strong>{post.is_verified_buy ? "Verified buy" : "Community pick"}</strong>
+            <strong>{formatVerificationLabel(post)}</strong>
           </span>
         </Link>
 

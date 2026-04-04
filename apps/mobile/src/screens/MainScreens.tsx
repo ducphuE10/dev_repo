@@ -160,6 +160,19 @@ const buildAffiliateUrl = (postId: string) => `${mobileAppShell.apiBaseUrl.repla
 const buildProfileMeta = (post: ApiPost) =>
   `${post.user.verified_buy_count} verified buys • ${post.upvote_count} upvotes on this review`;
 
+const buildVerificationLabel = (post: ApiPost) => {
+  switch (post.receipt_verification_status) {
+    case "verified":
+      return "Verified buy";
+    case "pending":
+      return "Receipt check pending";
+    case "failed":
+      return "Receipt check failed";
+    default:
+      return "Community review";
+  }
+};
+
 const CategoryChips = ({
   categories,
   onSelect,
@@ -285,7 +298,7 @@ const FeedPostCard = ({
     </Text>
     <Text style={styles.cardBody}>{post.review_text ?? "No written review yet."}</Text>
     <Text style={styles.cardMeta}>
-      Save {formatMoney(post.price_saved, post.dupe_currency)} • {post.is_verified_buy ? "Verified buy" : "Community review"}
+      Save {formatMoney(post.price_saved, post.dupe_currency)} • {buildVerificationLabel(post)}
     </Text>
     <PostActionBar onOpenAuthor={onOpenAuthor} post={post} />
   </Pressable>
@@ -564,8 +577,14 @@ export const DupeDetailScreen = ({ navigation, route }: DupeDetailScreenProps) =
             <Text style={styles.cardTitle}>Why it hits</Text>
             <Text style={styles.cardBody}>{post.review_text ?? "No written review yet."}</Text>
             <Text style={styles.cardMeta}>
-              Save {formatMoney(post.price_saved, post.dupe_currency)} • {post.is_verified_buy ? "Verified buy" : "Community review"}
+              Save {formatMoney(post.price_saved, post.dupe_currency)} • {buildVerificationLabel(post)}
             </Text>
+            {post.receipt_verification_status === "pending" ? (
+              <Text style={styles.cardBody}>The creator uploaded a receipt and OCR verification is still running.</Text>
+            ) : null}
+            {post.receipt_verification_status === "failed" ? (
+              <Text style={styles.cardBody}>Receipt OCR could not confirm this purchase, so the post stays browseable without the badge.</Text>
+            ) : null}
             <PostActionBar onOpenAuthor={() => navigation.navigate("PublicProfile", { userId: post.user.id })} post={post} />
           </View>
 

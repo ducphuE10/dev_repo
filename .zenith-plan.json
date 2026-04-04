@@ -174,8 +174,8 @@
         "Mobile and web surfaces display the resulting receipt verification states correctly."
       ],
       "priority": 13,
-      "status": "pending",
-      "completed_in_iteration": null,
+      "status": "completed",
+      "completed_in_iteration": 12,
       "discovered_in_iteration": 11
     },
     {
@@ -212,6 +212,6 @@
     "The root lint command is still a custom workspace invariant check rather than a full code-style linter such as ESLint or Biome.",
     "The API now enqueues background work through an app-local job queue seam for post creation, but real BullMQ-backed worker execution is still deferred until the later worker-heavy iterations flesh out processing and caching infrastructure.",
     "Mobile post uploads currently read the selected local asset into memory before PUT-ing it to the signed storage URL, which is acceptable for MVP photos and short clips but may need a streaming upload path for larger media later.",
-    "The receipt verification flow currently distinguishes only not_submitted, pending, and verified states; persisting a terminal failed OCR outcome still requires follow-up schema/API work."
+    "Receipt OCR failures now persist as a first-class post state, but notifying creators about failed verification attempts is still deferred until the later launch-safeguards work adds a real notification surface."
   ]
 }

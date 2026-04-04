@@ -3,6 +3,7 @@ import type { DatabaseClient } from "@dupe-hunt/db";
 export type FeedTab = "for_you" | "trending" | "new";
 export type PostMediaType = "video" | "photo";
 export type PostStatus = "active" | "flagged" | "removed";
+export type ReceiptVerificationStatus = "not_submitted" | "pending" | "verified" | "failed";
 export type FlagReason = "spam" | "fake" | "inappropriate" | "affiliate_abuse";
 export type SearchSort = "upvotes" | "newest";
 
@@ -62,6 +63,7 @@ export interface PostRecord {
   flagCount: number;
   isVerifiedBuy: boolean;
   receiptUrl: string | null;
+  receiptVerificationStatus: ReceiptVerificationStatus;
   receiptVerifiedAt: string | null;
   status: PostStatus;
   createdAt: string;
@@ -163,6 +165,10 @@ export interface ApiRepository {
   removeSavedPost: (userId: string, postId: string) => Promise<PostRecord | null>;
   flagPost: (userId: string, postId: string, reason: FlagReason) => Promise<PostRecord | null>;
   attachReceiptToPost: (postId: string, receiptUrl: string) => Promise<PostRecord | null>;
+  resolveReceiptVerification: (
+    postId: string,
+    status: Extract<ReceiptVerificationStatus, "verified" | "failed">
+  ) => Promise<PostRecord | null>;
   recordAffiliateClick: (postId: string, userId: string | null, sessionId: string) => Promise<void>;
   listFlaggedPosts: () => Promise<PostRecord[]>;
   updatePostStatus: (postId: string, status: PostStatus) => Promise<PostRecord | null>;
@@ -218,6 +224,7 @@ interface PostRow {
   flag_count: number;
   is_verified_buy: boolean;
   receipt_url: string | null;
+  receipt_verification_status: ReceiptVerificationStatus;
   receipt_verified_at: Date | string | null;
   status: PostStatus;
   created_at: Date | string;
@@ -376,6 +383,7 @@ const mapPostRow = (row: PostRow): PostRecord => ({
   flagCount: row.flag_count,
   isVerifiedBuy: row.is_verified_buy,
   receiptUrl: row.receipt_url,
+  receiptVerificationStatus: row.receipt_verification_status,
   receiptVerifiedAt: row.receipt_verified_at ? toIsoString(row.receipt_verified_at) : null,
   status: row.status,
   createdAt: toIsoString(row.created_at),
@@ -446,6 +454,7 @@ const postSelection = `
   p.flag_count,
   p.is_verified_buy,
   p.receipt_url,
+  p.receipt_verification_status,
   p.receipt_verified_at,
   p.status,
   p.created_at,
@@ -520,15 +529,23 @@ export const createDatabaseRepository = (database: DatabaseClient): ApiRepositor
     `;
   };
 
-  const syncUserTotalUpvotes = async (userId: string) => {
+  const syncUserProfileStats = async (userId: string) => {
     await database.sql`
       UPDATE users u
-      SET total_upvotes = (
-        SELECT COALESCE(SUM(p.upvote_count), 0)::INTEGER
-        FROM posts p
-        WHERE p.user_id = u.id
-          AND p.status = 'active'
-      )
+      SET
+        total_upvotes = (
+          SELECT COALESCE(SUM(p.upvote_count), 0)::INTEGER
+          FROM posts p
+          WHERE p.user_id = u.id
+            AND p.status = 'active'
+        ),
+        verified_buy_count = (
+          SELECT COUNT(*)::INTEGER
+          FROM posts p
+          WHERE p.user_id = u.id
+            AND p.status = 'active'
+            AND p.is_verified_buy = TRUE
+        )
       WHERE u.id = ${userId}
     `;
   };
@@ -577,7 +594,7 @@ export const createDatabaseRepository = (database: DatabaseClient): ApiRepositor
     const post = await readPostRowsById(postId, true).then((rows) => (rows[0] ? mapPostRow(rows[0]) : null));
 
     if (post) {
-      await syncUserTotalUpvotes(post.userId);
+      await syncUserProfileStats(post.userId);
     }
 
     return post;
@@ -889,7 +906,7 @@ export const createDatabaseRepository = (database: DatabaseClient): ApiRepositor
           AND post_id = ${postId}
       `;
       await syncPostCounters(postId);
-      await syncUserTotalUpvotes(existingPost.userId);
+      await syncUserProfileStats(existingPost.userId);
 
       return readPostRowsById(postId, true).then((rows) => (rows[0] ? mapPostRow(rows[0]) : null));
     },
@@ -906,7 +923,7 @@ export const createDatabaseRepository = (database: DatabaseClient): ApiRepositor
           AND post_id = ${postId}
       `;
       await syncPostCounters(postId);
-      await syncUserTotalUpvotes(existingPost.userId);
+      await syncUserProfileStats(existingPost.userId);
 
       return readPostRowsById(postId, true).then((rows) => (rows[0] ? mapPostRow(rows[0]) : null));
     },
@@ -928,7 +945,7 @@ export const createDatabaseRepository = (database: DatabaseClient): ApiRepositor
           AND post_id = ${postId}
       `;
       await syncPostCounters(postId);
-      await syncUserTotalUpvotes(existingPost.userId);
+      await syncUserProfileStats(existingPost.userId);
 
       return readPostRowsById(postId, true).then((rows) => (rows[0] ? mapPostRow(rows[0]) : null));
     },
@@ -945,7 +962,7 @@ export const createDatabaseRepository = (database: DatabaseClient): ApiRepositor
           AND post_id = ${postId}
       `;
       await syncPostCounters(postId);
-      await syncUserTotalUpvotes(existingPost.userId);
+      await syncUserProfileStats(existingPost.userId);
 
       return readPostRowsById(postId, true).then((rows) => (rows[0] ? mapPostRow(rows[0]) : null));
     },
@@ -1012,7 +1029,7 @@ export const createDatabaseRepository = (database: DatabaseClient): ApiRepositor
         return null;
       }
 
-      await syncUserTotalUpvotes(flaggedPost.userId);
+      await syncUserProfileStats(flaggedPost.userId);
 
       if (flaggedPost.status === "active" && flaggedPost.flagCount >= 5) {
         return updatePostStatusInternal(postId, "flagged");
@@ -1031,11 +1048,41 @@ export const createDatabaseRepository = (database: DatabaseClient): ApiRepositor
         UPDATE posts
         SET
           receipt_url = ${receiptUrl},
+          receipt_verification_status = 'pending',
           receipt_verified_at = NULL,
           is_verified_buy = FALSE,
           updated_at = NOW()
         WHERE id = ${postId}
       `;
+
+      await syncUserProfileStats(existingPost.userId);
+
+      return readPostRowsById(postId, true).then((rows) => (rows[0] ? mapPostRow(rows[0]) : null));
+    },
+    resolveReceiptVerification: async (postId, status) => {
+      const existingPost = await readPostRowsById(postId, true).then((rows) => (rows[0] ? mapPostRow(rows[0]) : null));
+
+      if (!existingPost) {
+        return null;
+      }
+
+      await database.sql`
+        UPDATE posts
+        SET
+          receipt_verification_status = ${status},
+          receipt_verified_at = CASE
+            WHEN ${status} = 'verified' THEN NOW()
+            ELSE NULL
+          END,
+          is_verified_buy = CASE
+            WHEN ${status} = 'verified' THEN TRUE
+            ELSE FALSE
+          END,
+          updated_at = NOW()
+        WHERE id = ${postId}
+      `;
+
+      await syncUserProfileStats(existingPost.userId);
 
       return readPostRowsById(postId, true).then((rows) => (rows[0] ? mapPostRow(rows[0]) : null));
     },
