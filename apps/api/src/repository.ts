@@ -105,6 +105,7 @@ export interface FindPostOptions {
 export interface ListPostsInput {
   tab: FeedTab;
   categoryIds?: number[];
+  authorUsername?: string;
   verifiedOnly: boolean;
   cursor?: string;
   limit: number;
@@ -756,6 +757,7 @@ export const createDatabaseRepository = (database: DatabaseClient): ApiRepositor
     },
     listPosts: async (input) => {
       const categoryIds = input.categoryIds ? Array.from(new Set(input.categoryIds)) : undefined;
+      const authorUsername = input.authorUsername?.trim().toLowerCase();
 
       if (categoryIds && categoryIds.length === 0) {
         return [];
@@ -773,6 +775,10 @@ export const createDatabaseRepository = (database: DatabaseClient): ApiRepositor
           }
 
           if (categoryIds && !categoryIds.includes(post.categoryId)) {
+            return false;
+          }
+
+          if (authorUsername && post.user.username.toLowerCase() !== authorUsername) {
             return false;
           }
 

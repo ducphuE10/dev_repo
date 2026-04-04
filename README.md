@@ -24,7 +24,7 @@ Dupe Hunt is a mobile-first B2C app that lets users post and discover product "d
 | Layer | Technology |
 |---|---|
 | Mobile | React Native (Expo) — iOS + Android |
-| Web | Next.js 14 (App Router) — SEO/browse layer |
+| Web | Next.js (App Router) — SEO/browse layer |
 | API | Node.js + Fastify |
 | Database | PostgreSQL + Drizzle ORM |
 | Cache | Redis |
@@ -42,7 +42,7 @@ Dupe Hunt is a mobile-first B2C app that lets users post and discover product "d
 dupe-hunt/
 ├── apps/
 │   ├── mobile/        # React Native (Expo)
-│   ├── web/           # Next.js 14
+│   ├── web/           # Next.js App Router
 │   └── api/           # Node.js + Fastify
 ├── packages/
 │   ├── db/            # Drizzle ORM schema + migrations
@@ -135,10 +135,11 @@ See [`docs/plan.md`](docs/plan.md) for the full phased build plan.
 
 ## Current Status
 
-- Workspace bootstrap, shared config, the initial database package, and the Fastify API scaffold are implemented.
-- `packages/db` now owns the Drizzle schema, sequential SQL migrations, and the root `pnpm db:migrate` workflow.
-- `apps/api` now provides a real Fastify server, shared config loading, dependency decoration, and an isolated `app.inject()` test harness.
-- `apps/web` and `apps/mobile` are still scaffolds, so their framework-specific runtime commands remain upcoming work.
+- Workspace bootstrap, shared config, the database package, the Fastify API, the Expo mobile app, and the browse-only Next.js web layer are implemented.
+- `packages/db` owns the Drizzle schema, sequential SQL migrations, and the root `pnpm db:migrate` workflow.
+- `apps/api` provides real auth, feed, social, search, affiliate, and admin endpoints with isolated `app.inject()` coverage.
+- `apps/mobile` now ships live auth, onboarding, feed, detail, profile, and post-composer flows against the API.
+- `apps/web` now serves SSR category, post, user, and search pages plus sitemap and affiliate redirect handling for SEO/share links.
 
 ---
 

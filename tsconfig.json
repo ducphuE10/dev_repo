@@ -7,9 +7,11 @@
     "paths": {
       "@dupe-hunt/config": ["packages/config/src/index.ts"],
       "@dupe-hunt/db": ["packages/db/src/index.ts"],
-      "@dupe-hunt/types": ["packages/types/src/index.ts"]
+      "@dupe-hunt/types": ["packages/types/src/index.ts"],
+      "next": ["apps/web/node_modules/next/index.d.ts"],
+      "next/*": ["apps/web/node_modules/next/*"]
     },
     "types": ["node", "react"]
   },
-  "include": ["apps/**/*.ts", "apps/**/*.tsx", "packages/**/*.ts"]
+  "include": ["apps/**/*.ts", "apps/**/*.tsx", "apps/**/*.d.ts", "packages/**/*.ts", "packages/**/*.d.ts"]
 }

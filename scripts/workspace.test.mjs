@@ -71,6 +71,41 @@ test("api workspace exposes a runnable Fastify scaffold", async () => {
   assert.match(testSource, /buildApiServer/);
 });
 
+test("web workspace exposes a Next.js browse layer with SSR routes and metadata", async () => {
+  const manifest = JSON.parse(await readFile(path.join(rootDir, "apps/web/package.json"), "utf8"));
+  const nextConfig = await readFile(path.join(rootDir, "apps/web/next.config.ts"), "utf8");
+  const layoutSource = await readFile(path.join(rootDir, "apps/web/app/layout.tsx"), "utf8");
+  const homePageSource = await readFile(path.join(rootDir, "apps/web/app/page.tsx"), "utf8");
+  const categoryPageSource = await readFile(path.join(rootDir, "apps/web/app/[category]/page.tsx"), "utf8");
+  const postPageSource = await readFile(path.join(rootDir, "apps/web/app/post/[id]/page.tsx"), "utf8");
+  const userPageSource = await readFile(path.join(rootDir, "apps/web/app/user/[username]/page.tsx"), "utf8");
+  const searchPageSource = await readFile(path.join(rootDir, "apps/web/app/search/page.tsx"), "utf8");
+  const affiliateRouteSource = await readFile(
+    path.join(rootDir, "apps/web/app/affiliate/go/[postId]/route.ts"),
+    "utf8"
+  );
+  const sitemapSource = await readFile(path.join(rootDir, "apps/web/app/sitemap.ts"), "utf8");
+  const apiClientSource = await readFile(path.join(rootDir, "apps/web/src/lib/api.ts"), "utf8");
+
+  assert.equal(manifest.scripts.dev, "next dev");
+  assert.equal(manifest.scripts.build, "next build");
+  assert.equal(manifest.scripts.start, "next start");
+  assert.equal(manifest.dependencies.next.startsWith("^15."), true);
+  assert.match(nextConfig, /transpilePackages/);
+  assert.match(layoutSource, /metadataBase/);
+  assert.match(homePageSource, /createHomeMetadata/);
+  assert.match(homePageSource, /listFeed/);
+  assert.match(categoryPageSource, /createCategoryMetadata/);
+  assert.match(postPageSource, /createPostMetadata/);
+  assert.match(userPageSource, /createUserMetadata/);
+  assert.match(searchPageSource, /createSearchMetadata/);
+  assert.match(affiliateRouteSource, /dupehunt_web_session/);
+  assert.match(affiliateRouteSource, /x-session-id/);
+  assert.match(sitemapSource, /buildAppUrl/);
+  assert.match(apiClientSource, /\/users\/username\//);
+  assert.match(apiClientSource, /\/search\/trending/);
+});
+
 test("mobile workspace exposes an Expo shell with centralized navigation and session plumbing", async () => {
   const manifest = JSON.parse(await readFile(path.join(rootDir, "apps/mobile/package.json"), "utf8"));
   const appJson = JSON.parse(await readFile(path.join(rootDir, "apps/mobile/app.json"), "utf8"));

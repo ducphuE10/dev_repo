@@ -4,6 +4,15 @@
   "private": true,
   "type": "module",
   "scripts": {
-    "dev": "node ../../scripts/dev-stub.mjs web"
+    "dev": "next dev",
+    "build": "next build",
+    "start": "next start"
+  },
+  "dependencies": {
+    "@dupe-hunt/config": "workspace:*",
+    "@dupe-hunt/types": "workspace:*",
+    "next": "^15.0.0",
+    "react": "^19.0.0",
+    "react-dom": "^19.0.0"
   }
 }

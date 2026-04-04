@@ -111,6 +111,15 @@ export interface ApiPostListResponse {
   posts: ApiPost[];
 }
 
+export interface ApiTrendingSearchTerm {
+  term: string;
+  search_count: number;
+}
+
+export interface ApiTrendingSearchResponse {
+  terms: ApiTrendingSearchTerm[];
+}
+
 export interface ApiMediaUploadResponse {
   upload_url: string;
   media_url: string;

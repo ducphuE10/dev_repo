@@ -44,6 +44,27 @@ for (const relativePath of requiredApiArtifacts) {
   await readFile(path.join(rootDir, relativePath), "utf8");
 }
 
+const requiredWebArtifacts = [
+  "apps/web/next.config.ts",
+  "apps/web/next-env.d.ts",
+  "apps/web/tsconfig.json",
+  "apps/web/app/layout.tsx",
+  "apps/web/app/page.tsx",
+  "apps/web/app/[category]/page.tsx",
+  "apps/web/app/post/[id]/page.tsx",
+  "apps/web/app/user/[username]/page.tsx",
+  "apps/web/app/search/page.tsx",
+  "apps/web/app/affiliate/go/[postId]/route.ts",
+  "apps/web/app/sitemap.ts",
+  "apps/web/app/globals.css",
+  "apps/web/src/lib/api.ts",
+  "apps/web/src/components/PostCard.tsx"
+];
+
+for (const relativePath of requiredWebArtifacts) {
+  await readFile(path.join(rootDir, relativePath), "utf8");
+}
+
 const requiredMobileArtifacts = [
   "apps/mobile/app.json",
   "apps/mobile/tsconfig.json",
@@ -90,5 +111,5 @@ for (const relativePath of requiredDatabaseArtifacts) {
 }
 
 console.log(
-  `Workspace lint passed for ${expectedWorkspaces.length} packages, ${envExamplePaths.length} env examples, ${requiredApiArtifacts.length} API artifacts, ${requiredMobileArtifacts.length} mobile artifacts, and ${requiredDatabaseArtifacts.length} database artifacts.`
+  `Workspace lint passed for ${expectedWorkspaces.length} packages, ${envExamplePaths.length} env examples, ${requiredApiArtifacts.length} API artifacts, ${requiredWebArtifacts.length} web artifacts, ${requiredMobileArtifacts.length} mobile artifacts, and ${requiredDatabaseArtifacts.length} database artifacts.`
 );

@@ -931,6 +931,20 @@ const registerUserRoutes = (app: FastifyInstance) => {
     return reply.status(204).send();
   });
 
+  app.get("/users/username/:username", async (request) => {
+    const params = requireObject(request.params, "Route params must be an object.");
+    const username = normalizeUsername(requireString(params.username, "username"));
+    const user = await app.repository.findUserByUsername(username);
+
+    if (!user) {
+      throw new ApiError(404, "USER_NOT_FOUND", "User profile was not found.");
+    }
+
+    return {
+      user: toPublicUser(user)
+    };
+  });
+
   app.get("/users/:id", async (request) => {
     const params = requireObject(request.params, "Route params must be an object.");
     const userId = normalizeUserId(requireString(params.id, "id"));
@@ -1033,6 +1047,8 @@ const registerPostRoutes = (app: FastifyInstance) => {
     const query = requireObject(request.query, "Query params must be an object.");
     const tab = readFeedTab(query.tab);
     const categorySlug = readOptionalCategorySlug(query.category);
+    const authorUsername =
+      query.username === undefined ? undefined : normalizeUsername(requireString(query.username, "username"));
     const verifiedOnly = readOptionalBooleanQuery(query.verified, "verified");
     const limit = readFeedLimit(query.limit);
     const cursor = query.cursor === undefined ? undefined : normalizePostId(requireString(query.cursor, "cursor"));
@@ -1057,6 +1073,7 @@ const registerPostRoutes = (app: FastifyInstance) => {
     const posts = await app.repository.listPosts({
       tab,
       categoryIds,
+      authorUsername,
       verifiedOnly,
       cursor,
       limit: limit + 1

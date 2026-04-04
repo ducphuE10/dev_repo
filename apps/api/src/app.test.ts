@@ -412,6 +412,7 @@ const createRepositoryDouble = () => {
     },
     listPosts: async (input) => {
       const categoryIds = input.categoryIds ? new Set(input.categoryIds) : null;
+      const authorUsername = input.authorUsername?.trim().toLowerCase();
       const filtered = Array.from(posts.values()).filter((post) => {
         if (post.status !== "active" || !post.category.isActive) {
           return false;
@@ -426,6 +427,10 @@ const createRepositoryDouble = () => {
         }
 
         if (categoryIds && !categoryIds.has(post.categoryId)) {
+          return false;
+        }
+
+        if (authorUsername && post.user.username.toLowerCase() !== authorUsername) {
           return false;
         }
 
@@ -1065,6 +1070,28 @@ test("public user lookup validates UUIDs and returns public profile data", async
   assert.equal(goodResponse.json().user.username, existingUser.username);
 });
 
+test("public user lookup also supports username-based reads for browse surfaces", async (context) => {
+  const { app, users } = createTestServer();
+  const existingUser = createUserRecord({
+    id: "99999999-9999-4999-8999-999999999999",
+    username: "glowgetter"
+  });
+  users.set(existingUser.id, existingUser);
+
+  context.after(async () => {
+    await app.close();
+  });
+
+  const response = await app.inject({
+    method: "GET",
+    url: "/users/username/glowgetter"
+  });
+
+  assert.equal(response.statusCode, 200);
+  assert.equal(response.json().user.id, existingUser.id);
+  assert.equal(response.json().user.username, "glowgetter");
+});
+
 test("user category preferences can be listed and replaced", async (context) => {
   const { app, users, userCategorySelections, createSession } = createTestServer();
   const existingUser = createUserRecord();
@@ -1355,6 +1382,58 @@ test("GET /posts supports anonymous trending queries with verified and category 
   assert.deepEqual(
     response.json().posts.map((post: { id: string }) => post.id),
     ["44444444-4444-4444-8444-000000000301"]
+  );
+});
+
+test("GET /posts supports creator username filters for public profile pages", async (context) => {
+  const { app, categories, posts, users } = createTestServer();
+  const glowGetter = createUserRecord({
+    id: "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa",
+    username: "glowgetter"
+  });
+  const techScout = createUserRecord({
+    id: "bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb",
+    username: "techscout"
+  });
+  users.set(glowGetter.id, glowGetter);
+  users.set(techScout.id, techScout);
+
+  posts.set(
+    "44444444-4444-4444-8444-000000000901",
+    createPostRecord({
+      id: "44444444-4444-4444-8444-000000000901",
+      user: glowGetter,
+      userId: glowGetter.id,
+      category: categories[0]!,
+      categoryId: categories[0]!.id,
+      dupeProductName: "Glass Skin Tint"
+    })
+  );
+  posts.set(
+    "44444444-4444-4444-8444-000000000902",
+    createPostRecord({
+      id: "44444444-4444-4444-8444-000000000902",
+      user: techScout,
+      userId: techScout.id,
+      category: categories[1]!,
+      categoryId: categories[1]!.id,
+      dupeProductName: "USB-C Hub"
+    })
+  );
+
+  context.after(async () => {
+    await app.close();
+  });
+
+  const response = await app.inject({
+    method: "GET",
+    url: "/posts?tab=new&username=glowgetter"
+  });
+
+  assert.equal(response.statusCode, 200);
+  assert.deepEqual(
+    response.json().posts.map((post: { id: string }) => post.id),
+    ["44444444-4444-4444-8444-000000000901"]
   );
 });
 
