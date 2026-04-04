@@ -37,6 +37,7 @@ export interface RedisClient {
 
 export type BackgroundJobName =
   | "process-video"
+  | "verify-receipt"
   | "wrap-affiliate-link"
   | "update-post-counts"
   | "auto-flag-review";
@@ -423,6 +424,16 @@ const readUploadContentType = (value: unknown, mediaType: PostMediaType) => {
   return contentType;
 };
 
+const readReceiptContentType = (value: unknown) => {
+  const contentType = requireString(value, "content_type").toLowerCase();
+
+  if (!contentType.startsWith("image/")) {
+    throw new ApiError(400, "VALIDATION_ERROR", "content_type must be an image MIME type for receipts.");
+  }
+
+  return contentType;
+};
+
 const inferFileExtension = (fileName: string | undefined, contentType: string) => {
   const normalizedFileName = fileName?.trim().toLowerCase();
   const fileExtension = normalizedFileName?.includes(".") ? normalizedFileName.split(".").pop() : undefined;
@@ -495,6 +506,9 @@ const createUploadSignature = (key: string, contentType: string, expiresAt: numb
 const createMediaStorageKey = (userId: string, mediaType: PostMediaType, fileName: string | undefined, contentType: string) =>
   `posts/${userId}/${mediaType}/${randomUUID()}.${inferFileExtension(fileName, contentType)}`;
 
+const createReceiptStorageKey = (userId: string, postId: string, fileName: string | undefined, contentType: string) =>
+  `receipts/${userId}/${postId}/${randomUUID()}.${inferFileExtension(fileName, contentType)}`;
+
 const createMediaUploadUrl = (
   config: ApiConfig,
   key: string,
@@ -516,6 +530,20 @@ const createMediaUploadUrl = (
 };
 
 const createPublicMediaUrl = (config: ApiConfig, key: string) => `https://${config.cloudflareR2Bucket}.r2.dev/${key}`;
+
+const createPrivateObjectReference = (config: ApiConfig, key: string) => `r2://${config.cloudflareR2Bucket}/${key}`;
+
+const getReceiptVerificationStatus = (post: PostRecord) => {
+  if (post.isVerifiedBuy) {
+    return "verified";
+  }
+
+  if (post.receiptUrl) {
+    return "pending";
+  }
+
+  return "not_submitted";
+};
 
 const toPublicUser = (user: UserRecord) => ({
   id: user.id,
@@ -565,6 +593,8 @@ const toPost = (post: PostRecord) => ({
   downvote_count: post.downvoteCount,
   flag_count: post.flagCount,
   is_verified_buy: post.isVerifiedBuy,
+  receipt_verification_status: getReceiptVerificationStatus(post),
+  receipt_verified_at: post.receiptVerifiedAt,
   status: post.status,
   created_at: post.createdAt,
   updated_at: post.updatedAt,
@@ -674,6 +704,35 @@ const requireAdminRequest = (request: FastifyRequest, app: FastifyInstance) => {
   if (typeof adminKey !== "string" || adminKey !== app.config.adminApiKey) {
     throw new ApiError(401, "ADMIN_UNAUTHORIZED", "A valid admin key is required.");
   }
+};
+
+const requireOwnedPost = async (request: FastifyRequest, app: FastifyInstance, postId: string) => {
+  const { user } = await requireAuthenticatedUser(request, app);
+  const post = await app.repository.findPostById(postId, { includeInactive: true });
+
+  if (!post || post.status === "removed") {
+    throw new ApiError(404, "POST_NOT_FOUND", "Post was not found.");
+  }
+
+  if (post.user.id !== user.id) {
+    throw new ApiError(403, "FORBIDDEN", "You can only manage receipts for your own posts.");
+  }
+
+  return {
+    user,
+    post
+  };
+};
+
+const readReceiptKey = (value: unknown, userId: string, postId: string) => {
+  const receiptKey = requireString(value, "receipt_key");
+  const expectedPrefix = `receipts/${userId}/${postId}/`;
+
+  if (!receiptKey.startsWith(expectedPrefix)) {
+    throw new ApiError(400, "VALIDATION_ERROR", "receipt_key must reference a receipt uploaded for this post.");
+  }
+
+  return receiptKey;
 };
 
 const resolveCategoryFilterIds = async (
@@ -987,6 +1046,23 @@ const registerUploadRoutes = (app: FastifyInstance) => {
       expires_in: expiresIn
     };
   });
+
+  app.post("/upload/receipt", async (request) => {
+    const body = requireObject(request.body);
+    const postId = normalizePostId(requireString(body.post_id, "post_id"));
+    const { user } = await requireOwnedPost(request, app, postId);
+    const contentType = readReceiptContentType(body.content_type);
+    const fileName = readOptionalString(body.file_name, "file_name", 255);
+    const key = createReceiptStorageKey(user.id, postId, fileName, contentType);
+    const expiresIn = 300;
+    const expiresAt = Math.floor(Date.now() / 1000) + expiresIn;
+
+    return {
+      upload_url: createMediaUploadUrl(app.config, key, contentType, expiresAt),
+      receipt_key: key,
+      expires_in: expiresIn
+    };
+  });
 };
 
 const registerPostRoutes = (app: FastifyInstance) => {
@@ -1234,6 +1310,30 @@ const registerPostRoutes = (app: FastifyInstance) => {
         flagCount: post.flagCount
       });
     }
+
+    return {
+      post: toPost(post)
+    };
+  });
+
+  app.post("/posts/:id/verify", async (request) => {
+    const params = requireObject(request.params, "Route params must be an object.");
+    const body = requireObject(request.body);
+    const postId = normalizePostId(requireString(params.id, "id"));
+    const { user } = await requireOwnedPost(request, app, postId);
+    const receiptKey = readReceiptKey(body.receipt_key, user.id, postId);
+    const post = await app.repository.attachReceiptToPost(postId, createPrivateObjectReference(app.config, receiptKey));
+
+    if (!post) {
+      throw new ApiError(404, "POST_NOT_FOUND", "Post was not found.");
+    }
+
+    await app.jobs.enqueue("verify-receipt", {
+      postId,
+      userId: user.id,
+      receiptKey,
+      receiptStorageRef: post.receiptUrl
+    });
 
     return {
       post: toPost(post)

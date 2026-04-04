@@ -66,6 +66,8 @@ export interface ApiPost {
   downvote_count: number;
   flag_count: number;
   is_verified_buy: boolean;
+  receipt_verification_status: "not_submitted" | "pending" | "verified";
+  receipt_verified_at: string | null;
   status: "active" | "flagged" | "removed";
   created_at: string;
   updated_at: string;
@@ -123,6 +125,12 @@ export interface ApiTrendingSearchResponse {
 export interface ApiMediaUploadResponse {
   upload_url: string;
   media_url: string;
+  expires_in: number;
+}
+
+export interface ApiReceiptUploadResponse {
+  upload_url: string;
+  receipt_key: string;
   expires_in: number;
 }
 

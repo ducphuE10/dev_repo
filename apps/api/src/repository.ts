@@ -61,6 +61,8 @@ export interface PostRecord {
   downvoteCount: number;
   flagCount: number;
   isVerifiedBuy: boolean;
+  receiptUrl: string | null;
+  receiptVerifiedAt: string | null;
   status: PostStatus;
   createdAt: string;
   updatedAt: string;
@@ -160,6 +162,7 @@ export interface ApiRepository {
   savePost: (userId: string, postId: string) => Promise<PostRecord | null>;
   removeSavedPost: (userId: string, postId: string) => Promise<PostRecord | null>;
   flagPost: (userId: string, postId: string, reason: FlagReason) => Promise<PostRecord | null>;
+  attachReceiptToPost: (postId: string, receiptUrl: string) => Promise<PostRecord | null>;
   recordAffiliateClick: (postId: string, userId: string | null, sessionId: string) => Promise<void>;
   listFlaggedPosts: () => Promise<PostRecord[]>;
   updatePostStatus: (postId: string, status: PostStatus) => Promise<PostRecord | null>;
@@ -214,6 +217,8 @@ interface PostRow {
   downvote_count: number;
   flag_count: number;
   is_verified_buy: boolean;
+  receipt_url: string | null;
+  receipt_verified_at: Date | string | null;
   status: PostStatus;
   created_at: Date | string;
   updated_at: Date | string;
@@ -370,6 +375,8 @@ const mapPostRow = (row: PostRow): PostRecord => ({
   downvoteCount: row.downvote_count,
   flagCount: row.flag_count,
   isVerifiedBuy: row.is_verified_buy,
+  receiptUrl: row.receipt_url,
+  receiptVerifiedAt: row.receipt_verified_at ? toIsoString(row.receipt_verified_at) : null,
   status: row.status,
   createdAt: toIsoString(row.created_at),
   updatedAt: toIsoString(row.updated_at),
@@ -438,6 +445,8 @@ const postSelection = `
   p.downvote_count,
   p.flag_count,
   p.is_verified_buy,
+  p.receipt_url,
+  p.receipt_verified_at,
   p.status,
   p.created_at,
   p.updated_at,
@@ -1010,6 +1019,25 @@ export const createDatabaseRepository = (database: DatabaseClient): ApiRepositor
       }
 
       return flaggedPost;
+    },
+    attachReceiptToPost: async (postId, receiptUrl) => {
+      const existingPost = await readPostRowsById(postId, true).then((rows) => (rows[0] ? mapPostRow(rows[0]) : null));
+
+      if (!existingPost) {
+        return null;
+      }
+
+      await database.sql`
+        UPDATE posts
+        SET
+          receipt_url = ${receiptUrl},
+          receipt_verified_at = NULL,
+          is_verified_buy = FALSE,
+          updated_at = NOW()
+        WHERE id = ${postId}
+      `;
+
+      return readPostRowsById(postId, true).then((rows) => (rows[0] ? mapPostRow(rows[0]) : null));
     },
     recordAffiliateClick: async (postId, userId, sessionId) => {
       await database.sql`

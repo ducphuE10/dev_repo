@@ -126,6 +126,8 @@ const createPostRecord = (overrides: Partial<PostRecord> = {}): PostRecord => {
     downvoteCount: overrides.downvoteCount ?? 0,
     flagCount: overrides.flagCount ?? 0,
     isVerifiedBuy: overrides.isVerifiedBuy ?? false,
+    receiptUrl: overrides.receiptUrl ?? null,
+    receiptVerifiedAt: overrides.receiptVerifiedAt ?? null,
     status: overrides.status ?? "active",
     createdAt: overrides.createdAt ?? now,
     updatedAt: overrides.updatedAt ?? now,
@@ -588,6 +590,25 @@ const createRepositoryDouble = () => {
       if (updated && updated.flagCount >= 5 && updated.status === "active") {
         return transitionPostStatus(postId, "flagged");
       }
+
+      return updated;
+    },
+    attachReceiptToPost: async (postId, receiptUrl) => {
+      const existing = posts.get(postId);
+
+      if (!existing) {
+        return null;
+      }
+
+      const updated: PostRecord = {
+        ...existing,
+        isVerifiedBuy: false,
+        receiptUrl,
+        receiptVerifiedAt: null,
+        updatedAt: now
+      };
+
+      posts.set(postId, updated);
 
       return updated;
     },
@@ -1191,6 +1212,117 @@ test("POST /upload/media signs a media upload target for authenticated users", a
   assert.match(payload.upload_url, /^https:\/\/account-id\.r2\.cloudflarestorage\.com\/dupe-hunt-media\/posts\//);
   assert.match(payload.upload_url, /signature=/);
   assert.match(payload.media_url, /^https:\/\/dupe-hunt-media\.r2\.dev\/posts\/.*\.jpg$/);
+});
+
+test("receipt verification uploads stay private and enqueue OCR work without exposing receipt URLs", async (context) => {
+  const { app, jobs, posts, users, createSession } = createTestServer();
+  const owner = createUserRecord();
+  users.set(owner.id, owner);
+  const post = createPostRecord({
+    id: "44444444-4444-4444-8444-000000000150",
+    user: owner,
+    userId: owner.id
+  });
+  posts.set(post.id, post);
+  const session = createSession(owner.id, owner.email, "password", "receipt-refresh");
+
+  context.after(async () => {
+    await app.close();
+  });
+
+  const uploadResponse = await app.inject({
+    method: "POST",
+    url: "/upload/receipt",
+    headers: {
+      authorization: `Bearer ${session.accessToken}`
+    },
+    payload: {
+      post_id: post.id,
+      content_type: "image/jpeg",
+      file_name: "sephora-receipt.jpg"
+    }
+  });
+
+  assert.equal(uploadResponse.statusCode, 200);
+  assert.equal(uploadResponse.json().receipt_url, undefined);
+  assert.match(uploadResponse.json().upload_url, /^https:\/\/account-id\.r2\.cloudflarestorage\.com\/dupe-hunt-media\/receipts\//);
+  assert.match(
+    uploadResponse.json().receipt_key,
+    new RegExp(`^receipts/${owner.id}/${post.id}/.*\\.jpg$`)
+  );
+
+  const verifyResponse = await app.inject({
+    method: "POST",
+    url: `/posts/${post.id}/verify`,
+    headers: {
+      authorization: `Bearer ${session.accessToken}`
+    },
+    payload: {
+      receipt_key: uploadResponse.json().receipt_key
+    }
+  });
+
+  assert.equal(verifyResponse.statusCode, 200);
+  assert.equal(verifyResponse.json().post.is_verified_buy, false);
+  assert.equal(verifyResponse.json().post.receipt_verification_status, "pending");
+  assert.equal(verifyResponse.json().post.receipt_verified_at, null);
+  assert.equal(posts.get(post.id)?.receiptUrl?.startsWith("r2://dupe-hunt-media/receipts/"), true);
+  assert.equal(
+    jobs.some((job) => job.name === "verify-receipt" && job.payload.postId === post.id),
+    true
+  );
+});
+
+test("receipt verification enforces ownership and upload key matching", async (context) => {
+  const { app, posts, users, createSession } = createTestServer();
+  const owner = createUserRecord();
+  const otherUser = createUserRecord({
+    id: "77777777-7777-4777-8777-777777777777",
+    username: "receipt_other",
+    email: "receipt-other@example.com"
+  });
+  users.set(owner.id, owner);
+  users.set(otherUser.id, otherUser);
+  const post = createPostRecord({
+    id: "44444444-4444-4444-8444-000000000151",
+    user: owner,
+    userId: owner.id
+  });
+  posts.set(post.id, post);
+  const ownerSession = createSession(owner.id, owner.email, "password", "owner-receipt-refresh");
+  const otherSession = createSession(otherUser.id, otherUser.email, "password", "other-receipt-refresh");
+
+  context.after(async () => {
+    await app.close();
+  });
+
+  const forbiddenUpload = await app.inject({
+    method: "POST",
+    url: "/upload/receipt",
+    headers: {
+      authorization: `Bearer ${otherSession.accessToken}`
+    },
+    payload: {
+      post_id: post.id,
+      content_type: "image/jpeg",
+      file_name: "stolen-receipt.jpg"
+    }
+  });
+
+  assert.equal(forbiddenUpload.statusCode, 403);
+
+  const invalidKeyResponse = await app.inject({
+    method: "POST",
+    url: `/posts/${post.id}/verify`,
+    headers: {
+      authorization: `Bearer ${ownerSession.accessToken}`
+    },
+    payload: {
+      receipt_key: `receipts/${owner.id}/44444444-4444-4444-8444-999999999999/not-this-post.jpg`
+    }
+  });
+
+  assert.equal(invalidKeyResponse.statusCode, 400);
 });
 
 test("POST /posts creates a post and enqueues video and affiliate jobs when needed", async (context) => {
