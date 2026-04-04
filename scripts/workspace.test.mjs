@@ -79,6 +79,9 @@ test("mobile workspace exposes an Expo shell with centralized navigation and ses
   const authSource = await readFile(path.join(rootDir, "apps/mobile/src/auth/AuthSessionProvider.tsx"), "utf8");
   const apiSource = await readFile(path.join(rootDir, "apps/mobile/src/lib/api.ts"), "utf8");
   const mainScreensSource = await readFile(path.join(rootDir, "apps/mobile/src/screens/MainScreens.tsx"), "utf8");
+  const profileHooksSource = await readFile(path.join(rootDir, "apps/mobile/src/hooks/useProfileQueries.ts"), "utf8");
+  const socialHooksSource = await readFile(path.join(rootDir, "apps/mobile/src/hooks/useSocialActions.ts"), "utf8");
+  const composerHooksSource = await readFile(path.join(rootDir, "apps/mobile/src/hooks/usePostComposer.ts"), "utf8");
 
   assert.equal(manifest.main, "expo/AppEntry");
   assert.equal(manifest.scripts.dev, "expo start --clear");
@@ -92,9 +95,18 @@ test("mobile workspace exposes an Expo shell with centralized navigation and ses
   assert.match(authSource, /dupe-hunt\.mobile\.session/);
   assert.match(apiSource, /parseEnvironment\(mobileEnvironmentContract/);
   assert.match(apiSource, /\/auth\/login/);
-  assert.match(apiSource, /\/auth\/refresh/);
+  assert.match(apiSource, /\/upload\/media/);
+  assert.match(apiSource, /\/posts\/\$?\{?postId?\}?\/save/);
+  assert.match(navigationSource, /PostStack/);
+  assert.match(navigationSource, /ProfileStack/);
+  assert.match(navigationSource, /SavedCollection/);
+  assert.match(mainScreensSource, /PostFormatScreen/);
+  assert.match(mainScreensSource, /EditProfileScreen/);
+  assert.match(mainScreensSource, /PublicProfileScreen/);
   assert.match(mainScreensSource, /FlatList/);
-  assert.match(mainScreensSource, /DupeDetailScreen/);
+  assert.match(profileHooksSource, /useSavedPostsQuery/);
+  assert.match(socialHooksSource, /viewer-interactions/);
+  assert.match(composerHooksSource, /requestMediaUpload/);
 });
 
 test("database workspace exposes drizzle schema and migration workflow", async () => {

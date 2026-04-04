@@ -7,10 +7,15 @@ import { useAuthSession } from "../auth/AuthSessionProvider.tsx";
 import { LoginScreen, RegisterScreen, WelcomeScreen } from "../screens/AuthScreens.tsx";
 import {
   DupeDetailScreen,
+  EditProfileScreen,
   FeedScreen,
   NotificationsScreen,
-  PostComposerScreen,
+  PostFormatScreen,
+  PostFormScreen,
+  PostPreviewScreen,
   ProfileScreen,
+  PublicProfileScreen,
+  SavedCollectionScreen,
   SearchScreen
 } from "../screens/MainScreens.tsx";
 import { CategorySelectScreen, OnboardingCompleteScreen } from "../screens/OnboardingScreens.tsx";
@@ -29,6 +34,25 @@ type OnboardingStackParamList = {
 type HomeStackParamList = {
   FeedHome: undefined;
   DupeDetail: { postId: string };
+  PublicProfile: { userId: string };
+};
+
+type PostStackParamList = {
+  PostFormat: undefined;
+  PostForm: {
+    draft: import("../hooks/usePostComposer.ts").PostComposerDraft;
+  };
+  PostPreview: {
+    draft: import("../hooks/usePostComposer.ts").PostComposerDraft;
+  };
+};
+
+type ProfileStackParamList = {
+  ProfileHome: undefined;
+  SavedCollection: undefined;
+  EditProfile: undefined;
+  PublicProfile: { userId: string };
+  DupeDetail: { postId: string };
 };
 
 type MainTabParamList = {
@@ -42,6 +66,8 @@ type MainTabParamList = {
 const AuthStack = createNativeStackNavigator<AuthStackParamList>();
 const OnboardingStack = createNativeStackNavigator<OnboardingStackParamList>();
 const HomeStack = createNativeStackNavigator<HomeStackParamList>();
+const PostStack = createNativeStackNavigator<PostStackParamList>();
+const ProfileStack = createNativeStackNavigator<ProfileStackParamList>();
 const MainTabs = createBottomTabNavigator<MainTabParamList>();
 
 const navigationTheme = {
@@ -124,7 +150,50 @@ const HomeNavigator = () => (
   >
     <HomeStack.Screen name="FeedHome" component={FeedScreen} options={{ headerShown: false }} />
     <HomeStack.Screen name="DupeDetail" component={DupeDetailScreen} options={{ title: "Dupe detail" }} />
+    <HomeStack.Screen name="PublicProfile" component={PublicProfileScreen} options={{ title: "Creator profile" }} />
   </HomeStack.Navigator>
+);
+
+const PostNavigator = () => (
+  <PostStack.Navigator
+    initialRouteName="PostFormat"
+    screenOptions={{
+      headerShadowVisible: false,
+      headerStyle: {
+        backgroundColor: "#FFF9F2"
+      },
+      headerTintColor: "#22170F",
+      contentStyle: {
+        backgroundColor: "#F8EFE6"
+      }
+    }}
+  >
+    <PostStack.Screen name="PostFormat" component={PostFormatScreen} options={{ headerShown: false }} />
+    <PostStack.Screen name="PostForm" component={PostFormScreen} options={{ title: "Post form" }} />
+    <PostStack.Screen name="PostPreview" component={PostPreviewScreen} options={{ title: "Preview" }} />
+  </PostStack.Navigator>
+);
+
+const ProfileNavigator = () => (
+  <ProfileStack.Navigator
+    initialRouteName="ProfileHome"
+    screenOptions={{
+      headerShadowVisible: false,
+      headerStyle: {
+        backgroundColor: "#FFF9F2"
+      },
+      headerTintColor: "#22170F",
+      contentStyle: {
+        backgroundColor: "#F8EFE6"
+      }
+    }}
+  >
+    <ProfileStack.Screen name="ProfileHome" component={ProfileScreen} options={{ headerShown: false }} />
+    <ProfileStack.Screen name="SavedCollection" component={SavedCollectionScreen} options={{ title: "Saved posts" }} />
+    <ProfileStack.Screen name="EditProfile" component={EditProfileScreen} options={{ title: "Edit profile" }} />
+    <ProfileStack.Screen name="PublicProfile" component={PublicProfileScreen} options={{ title: "Creator profile" }} />
+    <ProfileStack.Screen name="DupeDetail" component={DupeDetailScreen} options={{ title: "Dupe detail" }} />
+  </ProfileStack.Navigator>
 );
 
 const MainNavigator = () => (
@@ -148,9 +217,9 @@ const MainNavigator = () => (
   >
     <MainTabs.Screen name="Home" component={HomeNavigator} options={{ headerShown: false }} />
     <MainTabs.Screen name="Search" component={SearchScreen} />
-    <MainTabs.Screen name="Post" component={PostComposerScreen} />
+    <MainTabs.Screen name="Post" component={PostNavigator} options={{ headerShown: false }} />
     <MainTabs.Screen name="Notifications" component={NotificationsScreen} />
-    <MainTabs.Screen name="Profile" component={ProfileScreen} />
+    <MainTabs.Screen name="Profile" component={ProfileNavigator} options={{ headerShown: false }} />
   </MainTabs.Navigator>
 );
 

@@ -2,6 +2,7 @@ export type WorkspaceStatus = "scaffolded";
 
 export type WorkspaceAppName = "api" | "web" | "mobile";
 export type FeedTab = "for_you" | "trending" | "new";
+export type ApiPostMediaType = "photo" | "video";
 
 export type WorkspacePackageName =
   | "@dupe-hunt/api"
@@ -22,18 +23,18 @@ export interface ApiPublicUser {
   id: string;
   username: string;
   avatar_url: string | null;
+  bio: string | null;
   verified_buy_count: number;
+  total_upvotes: number;
   contributor_tier: string;
+  created_at: string;
+  last_active_at: string;
 }
 
 export interface ApiCurrentUser extends ApiPublicUser {
   email: string;
-  bio: string | null;
-  created_at: string;
-  last_active_at: string;
   last_post_date: string | null;
   posts_per_day_count: number;
-  total_upvotes: number;
 }
 
 export interface ApiCategory {
@@ -56,7 +57,7 @@ export interface ApiPost {
   dupe_price: number | null;
   dupe_currency: string;
   price_saved: number | null;
-  media_type: "photo" | "video";
+  media_type: ApiPostMediaType;
   media_urls: string[];
   review_text: string | null;
   affiliate_link: string | null;
@@ -84,6 +85,10 @@ export interface ApiCurrentUserResponse {
   user: ApiCurrentUser;
 }
 
+export interface ApiPublicUserResponse {
+  user: ApiPublicUser;
+}
+
 export interface ApiAuthResponse {
   user: {
     id: string;
@@ -100,6 +105,16 @@ export interface ApiFeedResponse {
 
 export interface ApiPostResponse {
   post: ApiPost;
+}
+
+export interface ApiPostListResponse {
+  posts: ApiPost[];
+}
+
+export interface ApiMediaUploadResponse {
+  upload_url: string;
+  media_url: string;
+  expires_in: number;
 }
 
 export interface EnvironmentVariableSpec {
