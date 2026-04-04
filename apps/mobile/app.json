@@ -4,6 +4,16 @@
     "slug": "dupe-hunt",
     "scheme": "dupehunt",
     "version": "0.1.0",
+    "plugins": [
+      [
+        "expo-image-picker",
+        {
+          "cameraPermission": "Allow Dupe Hunt to capture photos and videos for dupe posts.",
+          "microphonePermission": "Allow Dupe Hunt to record audio on video dupe posts.",
+          "photosPermission": "Allow Dupe Hunt to access your camera roll for dupe uploads."
+        }
+      ]
+    ],
     "orientation": "portrait",
     "userInterfaceStyle": "light",
     "backgroundColor": "#F8EFE6",

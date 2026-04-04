@@ -4,6 +4,7 @@ import type { ApiCategory, ApiPost, FeedTab } from "@dupe-hunt/types";
 import {
   ActivityIndicator,
   FlatList,
+  Image,
   Linking,
   Pressable,
   RefreshControl,
@@ -19,7 +20,13 @@ import { useAuthSession } from "../auth/AuthSessionProvider.tsx";
 import { PrimaryButton } from "../components/PrimaryButton.tsx";
 import { ScreenFrame } from "../components/ScreenFrame.tsx";
 import { useCategoryOptionsQuery } from "../hooks/useCategoryOptionsQuery.ts";
-import { createPostComposerDraft, usePublishPostMutation, type PostCaptureSource, type PostComposerDraft } from "../hooks/usePostComposer.ts";
+import {
+  createPostComposerDraft,
+  pickComposerMedia,
+  usePublishPostMutation,
+  type PostCaptureSource,
+  type PostComposerDraft
+} from "../hooks/usePostComposer.ts";
 import { useInfiniteFeedQuery, usePostDetailQuery } from "../hooks/useFeedPreviewQuery.ts";
 import {
   useCurrentUserQuery,
@@ -311,6 +318,10 @@ const ComposerInput = ({
 );
 
 const validateComposerDraft = (draft: PostComposerDraft) => {
+  if (!draft.selectedMedia) {
+    return "Choose a photo or video before continuing.";
+  }
+
   if (!draft.categoryId) {
     return "Choose a category before continuing.";
   }
@@ -335,6 +346,64 @@ const validateComposerDraft = (draft: PostComposerDraft) => {
   }
 
   return null;
+};
+
+const formatFileSize = (value: number | null) => {
+  if (!value || value <= 0) {
+    return "Size unavailable";
+  }
+
+  if (value >= 1024 * 1024) {
+    return `${(value / (1024 * 1024)).toFixed(1)} MB`;
+  }
+
+  return `${Math.max(1, Math.round(value / 1024))} KB`;
+};
+
+const formatDuration = (durationMs: number | null) => {
+  if (!durationMs || durationMs <= 0) {
+    return "Duration unavailable";
+  }
+
+  const totalSeconds = Math.max(1, Math.round(durationMs / 1000));
+  const minutes = Math.floor(totalSeconds / 60);
+  const seconds = totalSeconds % 60;
+
+  return `${minutes}:${String(seconds).padStart(2, "0")}`;
+};
+
+const ComposerMediaSummary = ({ draft }: { draft: PostComposerDraft }) => {
+  if (!draft.selectedMedia) {
+    return (
+      <View style={styles.mediaPlaceholder}>
+        <Text style={styles.cardBody}>No media selected yet.</Text>
+      </View>
+    );
+  }
+
+  return (
+    <View style={styles.mediaSummary}>
+      {draft.mediaType === "photo" ? (
+        <Image source={{ uri: draft.selectedMedia.uri }} style={styles.mediaPreviewImage} />
+      ) : (
+        <View style={styles.videoPreviewCard}>
+          <Text style={styles.videoPreviewTitle}>Video ready</Text>
+          <Text style={styles.videoPreviewBody}>{formatDuration(draft.selectedMedia.durationMs)}</Text>
+        </View>
+      )}
+      <View style={styles.mediaMetaStack}>
+        <Text style={styles.cardMeta}>{draft.selectedMedia.fileName}</Text>
+        <Text style={styles.cardBody}>
+          {draft.mediaType === "photo"
+            ? `${draft.selectedMedia.width}×${draft.selectedMedia.height}`
+            : `${draft.selectedMedia.width}×${draft.selectedMedia.height} • ${formatDuration(draft.selectedMedia.durationMs)}`}
+        </Text>
+        <Text style={styles.cardMeta}>
+          {draft.selectedMedia.mimeType} • {formatFileSize(draft.selectedMedia.fileSize)}
+        </Text>
+      </View>
+    </View>
+  );
 };
 
 export const FeedScreen = ({ navigation }: FeedScreenProps) => {
@@ -535,23 +604,49 @@ export const SearchScreen = () => {
 export const PostFormatScreen = ({ navigation }: PostFormatScreenProps) => {
   const [selectedCaptureSource, setSelectedCaptureSource] = useState<PostCaptureSource>("camera");
   const [selectedMediaType, setSelectedMediaType] = useState<"photo" | "video">("photo");
+  const [selectionError, setSelectionError] = useState<string | null>(null);
+  const [isSelectingMedia, setIsSelectingMedia] = useState(false);
+
+  const handleContinue = async () => {
+    setSelectionError(null);
+    setIsSelectingMedia(true);
+
+    try {
+      const selectedMedia = await pickComposerMedia({
+        captureSource: selectedCaptureSource,
+        mediaType: selectedMediaType
+      });
+
+      if (!selectedMedia) {
+        return;
+      }
+
+      navigation.navigate("PostForm", {
+        draft: {
+          ...createPostComposerDraft({
+            captureSource: selectedCaptureSource,
+            mediaType: selectedMediaType
+          }),
+          selectedMedia
+        }
+      });
+    } catch (error) {
+      setSelectionError(error instanceof Error ? error.message : "Could not open the media picker.");
+    } finally {
+      setIsSelectingMedia(false);
+    }
+  };
 
   return (
     <ScreenFrame
       eyebrow="Create"
       title="Pick your post format"
-      description="This flow reserves a real media-upload target, then walks through the full publish form and preview before posting to the API."
+      description="Choose the lane, open the native camera or gallery, and carry the selected asset through the full publish flow."
       footer={
         <PrimaryButton
-          label="Continue to post form"
-          onPress={() =>
-            navigation.navigate("PostForm", {
-              draft: createPostComposerDraft({
-                captureSource: selectedCaptureSource,
-                mediaType: selectedMediaType
-              })
-            })
-          }
+          disabled={isSelectingMedia}
+          label={isSelectingMedia ? "Opening picker..." : selectedCaptureSource === "camera" ? "Capture media" : "Pick from gallery"}
+          onPress={handleContinue}
         />
       }
     >
@@ -592,6 +687,14 @@ export const PostFormatScreen = ({ navigation }: PostFormatScreenProps) => {
           ))}
         </View>
       </View>
+      <View style={styles.card}>
+        <Text style={styles.cardTitle}>3. Choose your media</Text>
+        <Text style={styles.cardBody}>
+          We’ll open the native {selectedCaptureSource} flow for a {selectedMediaType} and bring the selected asset into the composer.
+        </Text>
+      </View>
+      {selectionError ? <Text style={styles.errorText}>{selectionError}</Text> : null}
+      {isSelectingMedia ? <ActivityIndicator color="#FF5A36" /> : null}
     </ScreenFrame>
   );
 };
@@ -600,12 +703,39 @@ export const PostFormScreen = ({ navigation, route }: PostFormScreenProps) => {
   const { data: categories, error, isLoading } = useCategoryOptionsQuery();
   const [draft, setDraft] = useState(route.params.draft);
   const [validationError, setValidationError] = useState<string | null>(null);
+  const [selectionError, setSelectionError] = useState<string | null>(null);
+  const [isSelectingMedia, setIsSelectingMedia] = useState(false);
+
+  const handleSelectMedia = async () => {
+    setSelectionError(null);
+    setIsSelectingMedia(true);
+
+    try {
+      const selectedMedia = await pickComposerMedia({
+        captureSource: draft.captureSource,
+        mediaType: draft.mediaType
+      });
+
+      if (!selectedMedia) {
+        return;
+      }
+
+      setDraft((currentDraft) => ({
+        ...currentDraft,
+        selectedMedia
+      }));
+    } catch (pickerError) {
+      setSelectionError(pickerError instanceof Error ? pickerError.message : "Could not select media.");
+    } finally {
+      setIsSelectingMedia(false);
+    }
+  };
 
   return (
     <ScreenFrame
       eyebrow="Post form"
       title="Write the dupe breakdown"
-      description={`Using the ${draft.captureSource} lane with a ${draft.mediaType} upload target.`}
+      description={`Using the ${draft.captureSource} lane with a ${draft.mediaType} asset that will be uploaded before publish.`}
       footer={
         <PrimaryButton
           label="Preview post"
@@ -625,6 +755,17 @@ export const PostFormScreen = ({ navigation, route }: PostFormScreenProps) => {
         />
       }
     >
+      <View style={styles.card}>
+        <Text style={styles.cardTitle}>Selected media</Text>
+        <ComposerMediaSummary draft={draft} />
+        <PrimaryButton
+          disabled={isSelectingMedia}
+          label={isSelectingMedia ? "Opening picker..." : draft.captureSource === "camera" ? "Retake media" : "Choose different media"}
+          onPress={handleSelectMedia}
+          variant="secondary"
+        />
+      </View>
+
       <View style={styles.card}>
         <Text style={styles.cardTitle}>Category</Text>
         {isLoading ? <ActivityIndicator color="#FF5A36" /> : null}
@@ -707,6 +848,7 @@ export const PostFormScreen = ({ navigation, route }: PostFormScreenProps) => {
           value={draft.affiliateLink}
         />
       </View>
+      {selectionError ? <Text style={styles.errorText}>{selectionError}</Text> : null}
       {validationError ? <Text style={styles.errorText}>{validationError}</Text> : null}
     </ScreenFrame>
   );
@@ -735,9 +877,9 @@ export const PostPreviewScreen = ({ navigation, route }: PostPreviewScreenProps)
   if (publishedPostId) {
     return (
       <ScreenFrame
-        eyebrow="Published"
-        title="Your dupe is live"
-        description="The post was created through the real API and the feed cache was refreshed so it can appear in the home timeline."
+      eyebrow="Published"
+      title="Your dupe is live"
+        description="The selected asset was uploaded to the signed storage target and the live post was then created through the API."
         footer={<PrimaryButton label="Create another" onPress={() => navigation.popToTop?.()} />}
       >
         <View style={styles.card}>
@@ -758,7 +900,7 @@ export const PostPreviewScreen = ({ navigation, route }: PostPreviewScreenProps)
     <ScreenFrame
       eyebrow="Preview"
       title={draft.dupeProductName || "Review your dupe post"}
-      description="One last check before the publish call signs a media upload target and creates the post."
+      description="One last check before the app signs the upload target, sends the selected binary, and creates the post."
       footer={<PrimaryButton disabled={publishMutation.isPending} label="Publish post" onPress={handlePublish} />}
     >
       <View style={styles.card}>
@@ -766,6 +908,7 @@ export const PostPreviewScreen = ({ navigation, route }: PostPreviewScreenProps)
         <Text style={styles.cardBody}>
           {draft.captureSource} lane • {draft.mediaType} upload
         </Text>
+        <ComposerMediaSummary draft={draft} />
       </View>
 
       <View style={styles.comparisonCard}>
@@ -1268,6 +1411,42 @@ const styles = StyleSheet.create({
   },
   optionBodyActive: {
     color: "#F6E8DC"
+  },
+  mediaPlaceholder: {
+    backgroundColor: "#FFF4EC",
+    borderRadius: 18,
+    padding: 16
+  },
+  mediaSummary: {
+    gap: 12
+  },
+  mediaPreviewImage: {
+    backgroundColor: "#F1E0D5",
+    borderRadius: 18,
+    height: 220,
+    width: "100%"
+  },
+  videoPreviewCard: {
+    alignItems: "center",
+    backgroundColor: "#22170F",
+    borderRadius: 18,
+    gap: 8,
+    justifyContent: "center",
+    minHeight: 180,
+    padding: 20
+  },
+  videoPreviewTitle: {
+    color: "#FFF9F2",
+    fontSize: 20,
+    fontWeight: "800"
+  },
+  videoPreviewBody: {
+    color: "#F6E8DC",
+    fontSize: 15,
+    lineHeight: 22
+  },
+  mediaMetaStack: {
+    gap: 4
   },
   fieldGroup: {
     gap: 8

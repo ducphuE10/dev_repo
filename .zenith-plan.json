@@ -134,9 +134,9 @@
         "Optimistic UI exists for upvote, save, and follow interactions."
       ],
       "priority": 10,
-      "status": "pending",
-      "completed_in_iteration": null,
-      "progress_note": "Iteration 8 added real mobile post metadata publishing, saved/profile/public-profile screens, and optimistic vote/save/follow interactions. Native camera/gallery device integration and binary media upload remain to finish this subtask."
+      "status": "completed",
+      "completed_in_iteration": 9,
+      "progress_note": "Iteration 8 shipped the live composer/profile/social screens, and iteration 9 finished native camera/gallery selection plus signed binary upload before post creation."
     },
     {
       "id": "ST-11",
@@ -169,6 +169,6 @@
     "The web app is still a workspace stub, so README runtime expectations for the browse/SEO experience remain aspirational until ST-11 lands.",
     "The root lint command is still a custom workspace invariant check rather than a full code-style linter such as ESLint or Biome.",
     "The API now enqueues background work through an app-local job queue seam for post creation, but real BullMQ-backed worker execution is still deferred until the later worker-heavy iterations flesh out processing and caching infrastructure.",
-    "ST-10 now publishes post metadata through the real mobile/API path, but native device media capture/gallery selection and binary upload are still pending because the app has not yet integrated dedicated Expo media modules."
+    "Mobile post uploads currently read the selected local asset into memory before PUT-ing it to the signed storage URL, which is acceptable for MVP photos and short clips but may need a streaming upload path for larger media later."
   ]
 }
