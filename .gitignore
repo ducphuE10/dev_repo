@@ -16,6 +16,8 @@ eggs/
 .eggs/
 lib/
 lib64/
+!apps/mobile/src/lib/
+!apps/mobile/src/lib/**
 parts/
 sdist/
 var/
@@ -208,6 +210,7 @@ __marimo__/
 
 # Node / monorepo bootstrap
 node_modules/
+.next/
 .pnpm-store/
 .turbo/
 .env.*

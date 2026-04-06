@@ -4,6 +4,13 @@
   "private": true,
   "type": "module",
   "scripts": {
-    "dev": "node ../../scripts/dev-stub.mjs api"
+    "dev": "node --watch ./src/server.ts",
+    "start": "node ./src/server.ts",
+    "test": "node --test ./src/*.test.ts"
+  },
+  "dependencies": {
+    "@dupe-hunt/config": "workspace:*",
+    "@dupe-hunt/db": "workspace:*",
+    "fastify": "^5.6.1"
   }
 }

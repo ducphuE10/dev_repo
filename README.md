@@ -1,4 +1,4 @@
-# Dupe Hunt 🔍
+# Dupe Hunt
 
 > *"Real people. Real dupes. Real savings."*
 
@@ -24,7 +24,7 @@ Dupe Hunt is a mobile-first B2C app that lets users post and discover product "d
 | Layer | Technology |
 |---|---|
 | Mobile | React Native (Expo) — iOS + Android |
-| Web | Next.js 14 (App Router) — SEO/browse layer |
+| Web | Next.js (App Router) — SEO/browse layer |
 | API | Node.js + Fastify |
 | Database | PostgreSQL + Drizzle ORM |
 | Cache | Redis |
@@ -42,7 +42,7 @@ Dupe Hunt is a mobile-first B2C app that lets users post and discover product "d
 dupe-hunt/
 ├── apps/
 │   ├── mobile/        # React Native (Expo)
-│   ├── web/           # Next.js 14
+│   ├── web/           # Next.js App Router
 │   └── api/           # Node.js + Fastify
 ├── packages/
 │   ├── db/            # Drizzle ORM schema + migrations
@@ -83,7 +83,7 @@ cp apps/web/.env.example apps/web/.env
 cp apps/mobile/.env.example apps/mobile/.env
 
 # Start local infrastructure (Postgres + Redis)
-docker-compose up -d
+docker compose up -d
 
 # Run database migrations
 pnpm db:migrate
@@ -100,6 +100,8 @@ pnpm dev --filter=web       # Web on http://localhost:3000
 pnpm dev --filter=mobile    # Expo dev server
 ```
 
+If `5432` or `6379` is already in use on your machine, override the host bindings for Docker Compose, for example `POSTGRES_PORT=55432 REDIS_PORT=56379 docker compose up -d`, and point `DATABASE_URL` / `REDIS_URL` at those ports in `apps/api/.env`.
+
 ---
 
 ## Documentation
@@ -109,6 +111,7 @@ pnpm dev --filter=mobile    # Expo dev server
 | [`docs/design.md`](docs/design.md) | Full product design — vision, features, monetization, growth strategy |
 | [`docs/technical.md`](docs/technical.md) | Technical spec — DB schema, API endpoints, screen map, flows |
 | [`docs/plan.md`](docs/plan.md) | Implementation plan — 10 phases, task checklists, timeline |
+| [`docs/beta-release.md`](docs/beta-release.md) | Beta release path, receipt privacy requirements, and launch monitoring hooks |
 | [`DEV_RULES.md`](DEV_RULES.md) | Contribution rules for developers and AI coding agents |
 | [`.zenith-progress.md`](.zenith-progress.md) | Running log of what has been built and key learnings |
 
@@ -130,6 +133,15 @@ pnpm dev --filter=mobile    # Expo dev server
 - Web: browse + SEO only
 
 See [`docs/plan.md`](docs/plan.md) for the full phased build plan.
+
+## Current Status
+
+- Workspace bootstrap, shared config, the database package, the Fastify API, the Expo mobile app, and the browse-only Next.js web layer are implemented.
+- `packages/db` owns the Drizzle schema, sequential SQL migrations, and the root `pnpm db:migrate` workflow.
+- `apps/api` provides real auth, feed, social, search, affiliate, and admin endpoints with isolated `app.inject()` coverage.
+- `apps/mobile` now ships live auth, onboarding, feed, detail, profile, and post-composer flows against the API.
+- `apps/web` now serves SSR category, post, user, and search pages plus sitemap and affiliate redirect handling for SEO/share links.
+- GitHub Actions now enforces the workspace `pnpm lint`, `pnpm typecheck`, and `pnpm test` contract on pull requests and `main`.
 
 ---
 

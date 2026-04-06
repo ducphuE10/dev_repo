@@ -2,10 +2,16 @@
   "extends": "./packages/config/typescript/base.json",
   "compilerOptions": {
     "baseUrl": ".",
+    "jsx": "react-jsx",
+    "lib": ["ES2022", "DOM"],
     "paths": {
       "@dupe-hunt/config": ["packages/config/src/index.ts"],
-      "@dupe-hunt/types": ["packages/types/src/index.ts"]
-    }
+      "@dupe-hunt/db": ["packages/db/src/index.ts"],
+      "@dupe-hunt/types": ["packages/types/src/index.ts"],
+      "next": ["apps/web/node_modules/next/index.d.ts"],
+      "next/*": ["apps/web/node_modules/next/*"]
+    },
+    "types": ["node", "react"]
   },
-  "include": ["apps/**/*.ts", "packages/**/*.ts"]
+  "include": ["apps/**/*.ts", "apps/**/*.tsx", "apps/**/*.d.ts", "packages/**/*.ts", "packages/**/*.d.ts"]
 }

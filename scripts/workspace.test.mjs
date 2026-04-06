@@ -10,6 +10,7 @@ test("root package exposes runnable workspace commands", async () => {
   const packageJson = JSON.parse(await readFile(path.join(rootDir, "package.json"), "utf8"));
 
   assert.equal(packageJson.scripts.dev.includes("turbo run dev"), true);
+  assert.equal(packageJson.scripts["db:migrate"], "pnpm --filter @dupe-hunt/db migrate");
   assert.equal(packageJson.scripts.lint, "node ./scripts/lint-workspace.mjs");
   assert.equal(packageJson.scripts.typecheck, "tsc --noEmit --project tsconfig.json");
   assert.equal(packageJson.scripts.test, "node --test ./scripts/workspace.test.mjs");
@@ -51,4 +52,137 @@ test("app environment examples exist for api, web, and mobile", async () => {
       assert.match(fileContents, new RegExp(`^${key}=`, "m"));
     }
   }
+});
+
+test("api workspace exposes a runnable Fastify scaffold", async () => {
+  const manifest = JSON.parse(await readFile(path.join(rootDir, "apps/api/package.json"), "utf8"));
+  const appSource = await readFile(path.join(rootDir, "apps/api/src/app.ts"), "utf8");
+  const serverSource = await readFile(path.join(rootDir, "apps/api/src/server.ts"), "utf8");
+  const testSource = await readFile(path.join(rootDir, "apps/api/src/app.test.ts"), "utf8");
+
+  assert.equal(manifest.scripts.dev, "node --watch ./src/server.ts");
+  assert.equal(manifest.scripts.start, "node ./src/server.ts");
+  assert.equal(manifest.scripts.test, "node --test ./src/*.test.ts");
+  assert.equal(manifest.dependencies.fastify, "^5.6.1");
+  assert.match(appSource, /app\.get\("\/health"/);
+  assert.match(appSource, /app\.decorate\("database"/);
+  assert.match(appSource, /app\.decorate\("redis"/);
+  assert.match(serverSource, /await app\.listen/);
+  assert.match(testSource, /buildApiServer/);
+});
+
+test("web workspace exposes a Next.js browse layer with SSR routes and metadata", async () => {
+  const manifest = JSON.parse(await readFile(path.join(rootDir, "apps/web/package.json"), "utf8"));
+  const nextConfig = await readFile(path.join(rootDir, "apps/web/next.config.ts"), "utf8");
+  const layoutSource = await readFile(path.join(rootDir, "apps/web/app/layout.tsx"), "utf8");
+  const homePageSource = await readFile(path.join(rootDir, "apps/web/app/page.tsx"), "utf8");
+  const categoryPageSource = await readFile(path.join(rootDir, "apps/web/app/[category]/page.tsx"), "utf8");
+  const postPageSource = await readFile(path.join(rootDir, "apps/web/app/post/[id]/page.tsx"), "utf8");
+  const userPageSource = await readFile(path.join(rootDir, "apps/web/app/user/[username]/page.tsx"), "utf8");
+  const searchPageSource = await readFile(path.join(rootDir, "apps/web/app/search/page.tsx"), "utf8");
+  const affiliateRouteSource = await readFile(
+    path.join(rootDir, "apps/web/app/affiliate/go/[postId]/route.ts"),
+    "utf8"
+  );
+  const sitemapSource = await readFile(path.join(rootDir, "apps/web/app/sitemap.ts"), "utf8");
+  const apiClientSource = await readFile(path.join(rootDir, "apps/web/src/lib/api.ts"), "utf8");
+
+  assert.equal(manifest.scripts.dev, "next dev");
+  assert.equal(manifest.scripts.build, "next build");
+  assert.equal(manifest.scripts.start, "next start");
+  assert.equal(manifest.dependencies.next.startsWith("^15."), true);
+  assert.match(nextConfig, /transpilePackages/);
+  assert.match(layoutSource, /metadataBase/);
+  assert.match(homePageSource, /createHomeMetadata/);
+  assert.match(homePageSource, /listFeed/);
+  assert.match(categoryPageSource, /createCategoryMetadata/);
+  assert.match(postPageSource, /createPostMetadata/);
+  assert.match(userPageSource, /createUserMetadata/);
+  assert.match(searchPageSource, /createSearchMetadata/);
+  assert.match(affiliateRouteSource, /dupehunt_web_session/);
+  assert.match(affiliateRouteSource, /x-session-id/);
+  assert.match(sitemapSource, /buildAppUrl/);
+  assert.match(apiClientSource, /\/users\/username\//);
+  assert.match(apiClientSource, /\/search\/trending/);
+});
+
+test("mobile workspace exposes an Expo shell with centralized navigation and session plumbing", async () => {
+  const manifest = JSON.parse(await readFile(path.join(rootDir, "apps/mobile/package.json"), "utf8"));
+  const appJson = JSON.parse(await readFile(path.join(rootDir, "apps/mobile/app.json"), "utf8"));
+  const appSource = await readFile(path.join(rootDir, "apps/mobile/App.tsx"), "utf8");
+  const navigationSource = await readFile(path.join(rootDir, "apps/mobile/src/navigation/index.tsx"), "utf8");
+  const authSource = await readFile(path.join(rootDir, "apps/mobile/src/auth/AuthSessionProvider.tsx"), "utf8");
+  const apiSource = await readFile(path.join(rootDir, "apps/mobile/src/lib/api.ts"), "utf8");
+  const mainScreensSource = await readFile(path.join(rootDir, "apps/mobile/src/screens/MainScreens.tsx"), "utf8");
+  const profileHooksSource = await readFile(path.join(rootDir, "apps/mobile/src/hooks/useProfileQueries.ts"), "utf8");
+  const socialHooksSource = await readFile(path.join(rootDir, "apps/mobile/src/hooks/useSocialActions.ts"), "utf8");
+  const composerHooksSource = await readFile(path.join(rootDir, "apps/mobile/src/hooks/usePostComposer.ts"), "utf8");
+
+  assert.equal(manifest.main, "expo/AppEntry");
+  assert.equal(manifest.scripts.dev, "expo start --clear");
+  assert.equal(manifest.dependencies.expo, "^55.0.11");
+  assert.equal(manifest.dependencies["@tanstack/react-query"], "^5.96.2");
+  assert.equal(appJson.expo.slug, "dupe-hunt");
+  assert.match(appSource, /GestureHandlerRootView/);
+  assert.match(navigationSource, /createBottomTabNavigator/);
+  assert.match(navigationSource, /createNativeStackNavigator/);
+  assert.match(authSource, /expo-secure-store/);
+  assert.match(authSource, /dupe-hunt\.mobile\.session/);
+  assert.match(apiSource, /parseEnvironment\(mobileEnvironmentContract/);
+  assert.match(apiSource, /\/auth\/login/);
+  assert.match(apiSource, /\/upload\/media/);
+  assert.match(apiSource, /\/posts\/\$?\{?postId?\}?\/save/);
+  assert.match(navigationSource, /PostStack/);
+  assert.match(navigationSource, /ProfileStack/);
+  assert.match(navigationSource, /SavedCollection/);
+  assert.match(mainScreensSource, /PostFormatScreen/);
+  assert.match(mainScreensSource, /EditProfileScreen/);
+  assert.match(mainScreensSource, /PublicProfileScreen/);
+  assert.match(mainScreensSource, /FlatList/);
+  assert.match(profileHooksSource, /useSavedPostsQuery/);
+  assert.match(socialHooksSource, /viewer-interactions/);
+  assert.match(composerHooksSource, /requestMediaUpload/);
+});
+
+test("database workspace exposes drizzle schema and migration workflow", async () => {
+  const manifest = JSON.parse(await readFile(path.join(rootDir, "packages/db/package.json"), "utf8"));
+  const schemaSource = await readFile(path.join(rootDir, "packages/db/src/schema.ts"), "utf8");
+  const clientSource = await readFile(path.join(rootDir, "packages/db/src/client.ts"), "utf8");
+  const migrateScript = await readFile(path.join(rootDir, "packages/db/scripts/migrate.mjs"), "utf8");
+
+  assert.equal(manifest.scripts.migrate, "node ./scripts/migrate.mjs");
+  assert.equal(manifest.dependencies["drizzle-orm"], "^0.45.2");
+  assert.equal(manifest.dependencies.postgres, "^3.4.8");
+  assert.match(schemaSource, /export const users = pgTable\("users"/);
+  assert.match(schemaSource, /export const affiliateClicks = pgTable\(/);
+  assert.match(clientSource, /createDatabaseClient/);
+  assert.match(migrateScript, /schema_migrations/);
+});
+
+test("database migrations remain sequential and cover the MVP tables", async () => {
+  const migrationFiles = [
+    "001_enable_pgcrypto_and_create_users.sql",
+    "002_create_categories.sql",
+    "003_create_posts.sql",
+    "004_create_upvotes_downvotes.sql",
+    "005_create_flags.sql",
+    "006_create_saves.sql",
+    "007_create_follows.sql",
+    "008_create_user_categories.sql",
+    "009_create_affiliate_clicks.sql"
+  ];
+
+  for (const fileName of migrationFiles) {
+    const contents = await readFile(path.join(rootDir, "packages/db/migrations", fileName), "utf8");
+
+    assert.equal(contents.length > 0, true);
+  }
+});
+
+test("local infrastructure config provisions postgres and redis", async () => {
+  const composeFile = await readFile(path.join(rootDir, "docker-compose.yml"), "utf8");
+
+  assert.match(composeFile, /^services:/m);
+  assert.match(composeFile, /^  postgres:/m);
+  assert.match(composeFile, /^  redis:/m);
 });

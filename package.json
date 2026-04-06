@@ -9,12 +9,14 @@
   },
   "scripts": {
     "dev": "turbo run dev --filter=@dupe-hunt/api --filter=@dupe-hunt/web --filter=@dupe-hunt/mobile",
+    "db:migrate": "pnpm --filter @dupe-hunt/db migrate",
     "lint": "node ./scripts/lint-workspace.mjs",
     "typecheck": "tsc --noEmit --project tsconfig.json",
     "test": "node --test ./scripts/workspace.test.mjs"
   },
   "devDependencies": {
     "@types/node": "^24.5.2",
+    "@types/react": "^19.2.14",
     "turbo": "^2.5.8",
     "typescript": "^5.9.2"
   }

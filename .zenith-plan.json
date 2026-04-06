@@ -1,6 +1,6 @@
 {
   "version": 1,
-  "task_summary": "Build Dupe Hunt from its current docs-only state into a working community-powered dupe discovery platform with a pnpm/Turborepo TypeScript monorepo, Fastify API, Expo mobile app, and Next.js SEO web layer.",
+  "task_summary": "Continue building Dupe Hunt from its current monorepo scaffold into a working community-powered dupe discovery platform with a Fastify API, Expo mobile app, and Next.js SEO web layer.",
   "quality_commands": {
     "lint": "pnpm lint",
     "typecheck": "pnpm typecheck",
@@ -43,8 +43,8 @@
         "A documented local workflow exists to run migrations against development services."
       ],
       "priority": 3,
-      "status": "pending",
-      "completed_in_iteration": null
+      "status": "completed",
+      "completed_in_iteration": 4
     },
     {
       "id": "ST-4",
@@ -56,8 +56,8 @@
         "API tests can run in isolation with the chosen test framework."
       ],
       "priority": 4,
-      "status": "pending",
-      "completed_in_iteration": null
+      "status": "completed",
+      "completed_in_iteration": 5
     },
     {
       "id": "ST-5",
@@ -69,8 +69,8 @@
         "Integration tests cover success and failure paths for auth and user/category flows."
       ],
       "priority": 5,
-      "status": "pending",
-      "completed_in_iteration": null
+      "status": "completed",
+      "completed_in_iteration": 6
     },
     {
       "id": "ST-6",
@@ -82,8 +82,8 @@
         "Integration tests cover post creation, deletion, and feed retrieval."
       ],
       "priority": 6,
-      "status": "pending",
-      "completed_in_iteration": null
+      "status": "completed",
+      "completed_in_iteration": 7
     },
     {
       "id": "ST-7",
@@ -95,8 +95,8 @@
         "Affiliate redirect tracking and admin endpoints are covered by automated tests."
       ],
       "priority": 7,
-      "status": "pending",
-      "completed_in_iteration": null
+      "status": "completed",
+      "completed_in_iteration": 5
     },
     {
       "id": "ST-8",
@@ -108,8 +108,8 @@
         "Auth token storage and API client plumbing exist without embedding business logic in screens."
       ],
       "priority": 8,
-      "status": "pending",
-      "completed_in_iteration": null
+      "status": "completed",
+      "completed_in_iteration": 6
     },
     {
       "id": "ST-9",
@@ -121,8 +121,8 @@
         "The mobile app handles loading, empty, and basic error states for the implemented screens."
       ],
       "priority": 9,
-      "status": "pending",
-      "completed_in_iteration": null
+      "status": "completed",
+      "completed_in_iteration": 7
     },
     {
       "id": "ST-10",
@@ -134,8 +134,9 @@
         "Optimistic UI exists for upvote, save, and follow interactions."
       ],
       "priority": 10,
-      "status": "pending",
-      "completed_in_iteration": null
+      "status": "completed",
+      "completed_in_iteration": 9,
+      "progress_note": "Iteration 8 shipped the live composer/profile/social screens, and iteration 9 finished native camera/gallery selection plus signed binary upload before post creation."
     },
     {
       "id": "ST-11",
@@ -147,26 +148,70 @@
         "Web users can browse posts and trigger affiliate redirects, but cannot create posts."
       ],
       "priority": 11,
-      "status": "pending",
-      "completed_in_iteration": null
+      "status": "completed",
+      "completed_in_iteration": 10
     },
     {
       "id": "ST-12",
-      "title": "Add receipt verification, moderation, CI, and launch hardening",
-      "description": "Finish the MVP with receipt OCR flows, moderation rules and admin queue, CI quality gates, monitoring hooks, and product polish needed for beta launch.",
+      "title": "Add receipt upload and verification submission API flow",
+      "description": "Implement the authenticated API slice for private receipt uploads and post-level verification submission so clients can kick off verified-buy checks without exposing receipt URLs.",
       "acceptance_criteria": [
-        "Receipt upload and verification status flow work without exposing private receipt URLs.",
-        "Moderation, abuse limits, and launch-quality UX safeguards are implemented.",
-        "CI runs the workspace quality commands and the repo documents a beta-ready release path."
+        "Authenticated users can request signed receipt upload targets for their own posts.",
+        "Submitting a receipt stores only a private storage reference and queues verification work.",
+        "API responses expose receipt verification status without returning private receipt URLs."
       ],
       "priority": 12,
-      "status": "pending",
-      "completed_in_iteration": null
+      "status": "completed",
+      "completed_in_iteration": 11
+    },
+    {
+      "id": "ST-13",
+      "title": "Complete OCR-backed receipt resolution across API and clients",
+      "description": "Add worker-backed OCR receipt checks, persist verified/failed outcomes, and surface the resulting verification states in mobile and web experiences.",
+      "acceptance_criteria": [
+        "Receipt verification jobs can mark posts as verified or failed based on OCR results.",
+        "User verified-buy counts and related profile/feed signals stay consistent after receipt decisions.",
+        "Mobile and web surfaces display the resulting receipt verification states correctly."
+      ],
+      "priority": 13,
+      "status": "completed",
+      "completed_in_iteration": 12,
+      "discovered_in_iteration": 11
+    },
+    {
+      "id": "ST-14",
+      "title": "Harden moderation, abuse limits, and launch UX safeguards",
+      "description": "Add the remaining moderation queue polish, abuse-throttling rules, and launch-quality UX protections needed for beta readiness.",
+      "acceptance_criteria": [
+        "Moderation reviewers have the missing queue/workflow support needed beyond the current API endpoints.",
+        "Basic abuse limits protect posting, affiliate spam, and receipt misuse paths.",
+        "User-facing safeguards cover the key loading, empty, and failure cases for launch-critical flows."
+      ],
+      "priority": 14,
+      "status": "completed",
+      "completed_in_iteration": 13,
+      "discovered_in_iteration": 11
+    },
+    {
+      "id": "ST-15",
+      "title": "Add CI quality gates and beta release documentation",
+      "description": "Create automated CI checks for the workspace quality commands and document the beta-ready release path, privacy requirements, and monitoring hooks.",
+      "acceptance_criteria": [
+        "CI runs the documented workspace quality commands on repository changes.",
+        "The repo documents the beta release path, including privacy-sensitive receipt handling.",
+        "Operational hooks for launch verification and monitoring are documented or scaffolded."
+      ],
+      "priority": 15,
+      "status": "completed",
+      "completed_in_iteration": 14,
+      "discovered_in_iteration": 11
     }
   ],
   "discovered_issues": [
-    "The repository is currently docs-only: the documented apps/, packages/, package.json, pnpm-workspace.yaml, and turbo.json files do not exist yet.",
-    "No test, lint, or typecheck commands are currently configured, so quality_commands is intentionally empty until the workspace bootstrap is implemented.",
-    "README setup and dev commands are aspirational in the current branch and will fail until the initial scaffold exists."
+    "The root workspace typecheck currently relies on apps/web/src/next-shim.d.ts because the monorepo's NodeNext TypeScript config does not resolve Next.js subpath declarations directly.",
+    "The root lint command is still a custom workspace invariant check rather than a full code-style linter such as ESLint or Biome.",
+    "The API now enqueues background work through an app-local job queue seam for post creation, but real BullMQ-backed worker execution is still deferred until the later worker-heavy iterations flesh out processing and caching infrastructure.",
+    "Mobile post uploads currently read the selected local asset into memory before PUT-ing it to the signed storage URL, which is acceptable for MVP photos and short clips but may need a streaming upload path for larger media later.",
+    "Receipt OCR failures now persist as a first-class post state, but notifying creators about failed verification attempts is still deferred until a dedicated notification surface is introduced."
   ]
 }
